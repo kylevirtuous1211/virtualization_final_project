@@ -406,7 +406,7 @@ They are not a null or baseline for our data: different scene, model, codec sett
 **Gaussian identity.** In this paper identity comes from an optimizer over one persistent pool.
 Our feed-forward setting must solve it explicitly.
 
-**Working files.** Scratch files (downloaded HTML/PDF, figure crops) are in /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/rt/.
+**Working files.** Scratch files (downloaded HTML/PDF, figure crops) are in papers/agent_workdir/rt/.
 That is outside the requested proj/ write location only by subfolder name; it is inside proj/.
 
 Sources: https://arxiv.org/abs/2604.02851 , https://arxiv.org/html/2604.02851 , https://arxiv.org/pdf/2604.02851 , https://api.github.com/repos/google/draco
@@ -457,7 +457,7 @@ The paper says nothing about the client, so "server only" is a fair reading of t
 ### Verifier notes
 
 Everything verified independently from https://arxiv.org/abs/2604.02851, https://arxiv.org/pdf/2604.02851 (9 pages, PyMuPDF text and vector extraction) and the figures rendered from the PDF.
-My files are in /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/verify_rt/.
+My files are in papers/agent_workdir/verify_rt/.
 
 Identity:
 - Title, authors (Siekkinen, Aalto; Kämäräinen, U.
@@ -816,7 +816,7 @@ Sources I read in full or inspected:
 - arxiv.org/abs/2608.01659 abstract only, for the name collision.
 
 The OpenReview PDF was blocked by a bot check.
-Files I downloaded are in /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/streamsplat/ (full.txt is the extracted paper text).
+Files I downloaded are in papers/agent_workdir/streamsplat/ (full.txt is the extracted paper text).
 
 Teaching point for the student.
 'Novel view' in this paper often means novel TIME, i.e. interpolated frames from the same fixed canonical camera.
@@ -966,7 +966,7 @@ This is irrelevant.
 None of the corrections changes the reader's overall conclusions or the relevance score.
 They are refinements: the OpenReview poster status, the DyCheck rows that were left out, the 1200x figure depending on which baseline is used, 'exactly two layers' being an inference, and the code's frame_gap default and zero-depth fallback.
 
-Scratch files are in /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/ss_verify/
+Scratch files are in papers/agent_workdir/ss_verify/
 
 ## Visionary: The World Model Carrier Built on WebGPU-Powered Gaussian Splatting Platform
 
@@ -1178,7 +1178,7 @@ Treat Visionary as a preprint.
 A search hit 'Powered By Gaussian Splats: From World Models to 3D Interactive Worlds' (ACM DOI 10.1145/3799820.3820876) is a SIGGRAPH 2026 course by different authors (Hartman, Coulombe, per Crossref), not this paper.
 For the student: the most instructive code to read slowly is onnx_gpu_io.ts (how a fixed-capacity WebGPU buffer and a GPU-side count are set up) and the renderer's preprocess, sort and drawIndirect chain.
 That chain is exactly where our network-fed slot updates would plug in.
-Scratch copies (paper text, repo clone) are in /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/visionary/.
+Scratch copies (paper text, repo clone) are in papers/agent_workdir/visionary/.
 
 ### Claim check
 
@@ -1252,7 +1252,7 @@ Second, the chunked offset-writeBuffer loader (ply_loader.ts loadFileStreaming) 
 
 ### Verifier notes
 
-Verified independently (fresh fetches into scratchpad/proj/visionary_verify/, fresh shallow clone of the repo at HEAD 76a2b93, committed 2026-10-15):
+Verified independently (fresh fetches into papers/agent_workdir/visionary_verify/, fresh shallow clone of the repo at HEAD 76a2b93, committed 2026-10-15):
 - Title, all 24 authors (Zhong as corresponding author, zhongzhihang@pjlab.org.cn), arXiv id 2512.08478, and v1 dated 9 Dec 2025 as the only version: arxiv.org/abs/2512.08478 citation meta tags and submission history.
 - Affiliations from arxiv.org/html/2512.08478: Shanghai AI Laboratory, Sichuan University, The University of Tokyo, Shanghai Jiao Tong University, Northwestern Polytechnical University.
 - Venue: a preprint.
@@ -1312,7 +1312,7 @@ Code: https://github.com/emanuele-artioli/MoQSplat - README and pyproject.toml d
 Forks: cd-athena/MoQSplat (has branch "emanuele"), EternalSky23/MoQSplat.
 Lab blog post (seen only as a search result, not read): https://athena.itec.aau.at/2026/07/moqsplat-adaptive-progressive-streaming-of-3d-gaussian-splatting-over-moq/ .
 Underlying MoQ stack named by the paper: moq-lite / moq-relay at https://github.com/moq-dev/moq ; MoQ spec cited: draft-ietf-moq-transport-18.
-Local copies: /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/moqsplat/{paper.pdf,full.txt,fig4.png,repo/}
+Local copies: papers/agent_workdir/moqsplat/{paper.pdf,full.txt,fig4.png,repo/}
 
 ### Problem
 
@@ -1540,7 +1540,7 @@ These must be cited as prior art.
 
 ### Verifier notes
 
-I re-fetched the primary sources independently into /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/verify_moqsplat/ : abs.html, full.html, paper.pdf, program.pdf, repo/ and my_fig4.png (Fig. 4 rendered at 300 dpi).
+I re-fetched the primary sources independently into papers/agent_workdir/verify_moqsplat/ : abs.html, full.html, paper.pdf, program.pdf, repo/ and my_fig4.png (Fig. 4 rendered at 300 dpi).
 
 Confirmed:
 - Title and the 6 authors match https://arxiv.org/abs/2609.18624.
@@ -1744,7 +1744,7 @@ The material calls it a 'causal incremental Gaussian scene for long videos', whi
 Sources read: the arXiv HTML full text (all sections, tables and ablations), the arXiv PDF via pypdf (10 pages, no appendix), the ICML virtual poster page and poster PDF, the project page, papers.cool, and the GitHub API.
 The OpenReview forum and PDF returned HTTP 403 (bot challenge) and were not read, so the ICML camera-ready may contain the appendix and may differ from arXiv v1.
 Two dates conflict: a search snippet said the poster was on 'Wed Jul 8', but the fetched icml.cc page says Thu Jul 9 2026, 2:30-4:15 PM KST; the page is taken as authoritative.
-Working files: /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/s2gs/ (full.txt, paper.txt, paper.pdf, slides.pdf).
+Working files: papers/agent_workdir/s2gs/ (full.txt, paper.txt, paper.pdf, slides.pdf).
 
 ### Claim check
 
@@ -1821,7 +1821,7 @@ Everything else in the reader's report checked out, each item against the URL li
   The 'no publicly available online feed-forward 3DGS methods' claim is in Sec 4.1.
   The reader's 'cannot_check' verdict on the latter is reasonable: the arXiv abstract pages of StreamGS (2503.06235) and LongSplat (2507.16144) list no code link, but I did not search further.
   All three corrections above are minor; none changes the relevance score or the main conclusion.
-- **Working files:** /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/s2gs_verify/ (full.html, full.txt, p.pdf).
+- **Working files:** papers/agent_workdir/s2gs_verify/ (full.html, full.txt, p.pdf).
 
 ## WebSplatter: Efficient and Faithful In-Browser 3D Gaussian Splatting across Devices via WebGPU
 
@@ -2167,7 +2167,7 @@ Code: gaussian_cull.wgsl:169.
 - Std 22.3 ms on a median of 63.7 ms is a coefficient of variation of about 35%, which hardly supports the v1 wording "remarkable consistency".
 - Baselines are pinned to commits (Appendix B): S1 367a943, S2 2dfc83e, W1 959a3ec, W2 f22ae04.
 
-Working files are under /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/ws_verify/.
+Working files are under papers/agent_workdir/ws_verify/.
 
 ## StreamSTGS: Streaming Spatial and Temporal Gaussian Grids for Real-Time Free-Viewpoint Video
 
@@ -2417,7 +2417,7 @@ That placement is only half right: it supports a codec bitrate knob, not network
 
 For the course project, cite it as 'AAAI 2026, arXiv 2511.06046, DOI 10.1609/aaai.v40i7.37482'.
 
-Downloaded text and code are in /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/streamstgs/ (paper.txt, test_offset.py, read_size.py).
+Downloaded text and code are in papers/agent_workdir/streamstgs/ (paper.txt, test_offset.py, read_size.py).
 
 ### Claim check
 
@@ -2514,7 +2514,7 @@ The decode-timer description is confirmed too: measure_decode_latency starts the
 The per-frame unit for training time is still an inference.
 The paper never states it, but Table 5's constant product supports it.
 
-My verification copies are in /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/streamstgs_verify/.
+My verification copies are in papers/agent_workdir/streamstgs_verify/.
 
 ## LMG: Efficient Streaming of Layered Mesh-Gaussian 3D Scenes
 
@@ -2685,7 +2685,7 @@ Not reusable because it is not released: streaming server, tile scheduler, UDP t
 FULL TEXT NOT READ.
 The paper is open access on ACM DL (CC BY-NC-ND per OpenAlex and Semantic Scholar), but dl.acm.org returns HTTP 403 to WebFetch and curl.
 When I retried curl with a browser user-agent, the auto-mode safety check blocked it as bot-check circumvention, so I did not try other workarounds.
-To finish this entry: the user downloads https://dl.acm.org/doi/pdf/10.1145/3793853.3795764 in a normal browser and saves it to /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/lmg/lmg.pdf.
+To finish this entry: the user downloads https://dl.acm.org/doi/pdf/10.1145/3793853.3795764 in a normal browser and saves it to papers/agent_workdir/lmg/lmg.pdf.
 Then the method and evaluation fields (urgency formula, transport, client platform, network traces, hardware, latency definition, external baselines, client resource handling) can be filled in from the full text.
 The fields above are limited to what these sources show:
 - project page: https://aiins-nthu.github.io/LMG/
@@ -2693,7 +2693,7 @@ The fields above are limited to what these sources show:
 - GitHub repo, all four branches, read via the gh API
 - Crossref, OpenAlex and Semantic Scholar metadata
 - the author homepage https://syjintw.github.io/
-Local copies of the page, symbol table and figures are in /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/lmg/.
+Local copies of the page, symbol table and figures are in papers/agent_workdir/lmg/.
 Minor naming inconsistency: the project-page abstract says 'production server', while the overview figure says 'Training Server'.
 Related work by the same group that may matter more for a live or dynamic system: LTS, a DASH streaming system for dynamic multi-layer 3DGS (MMSys'25 Best Paper, DOI 10.1145/3712676.3714445), and multi-frame bitrate allocation for dynamic 3DGS (EMS'24, DOI 10.1145/3672196.3673394).
 Both are listed on https://syjintw.github.io/ and were not verified here.
@@ -2824,9 +2824,9 @@ The 3 key numbers match both the project page and the publisher abstract on Sema
 What each number is compared against is still unverified: GaMeS for the training server is an inference, and the No Layer / No Tiling ablations for the streaming numbers are also an inference.
 
 The reader handled the 403 correctly and stopped.
-The local file lmg/lmg.pdf in the scratchpad is a 5.7 KB Cloudflare 'Just a moment...' HTML page, not the paper, so nobody should treat it as the full text.
+The local file papers/agent_workdir/lmg/lmg.pdf is a 5.7 KB Cloudflare 'Just a moment...' HTML page, not the paper, so nobody should treat it as the full text.
 
-My check files are in /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/lmg_verify/ (page.html, symtab.pdf, README.md, branch tree listings).
+My check files are in papers/agent_workdir/lmg_verify/ (page.html, symtab.pdf, README.md, branch tree listings).
 
 The full text is still needed for: the urgency formula, transport, client platform, client memory handling, network traces, hardware, latency definition and external baselines.
 
@@ -2923,7 +2923,7 @@ The closest are TIGAS's multi-user VRAM residency with reference counting and ev
 8. Leads seen but not verified: GSStream (ResearchGate only); '3DGS on Your Phone' (ACM 10.1145/3810919.3810924); 'Advancing Immersive Content Delivery with Dynamic 3DGS' (ACM 10.1145/3708468.3711886); '3D Gaussian-based Immersive Media Streaming in Networked XR' (MMSys'25, 10.1145/3712676.3719673); ACPGS (NOSSDAV'26, cited by CAGS); Mon3tr (2601.07518); Edge GS work (ECO-GS, ICASSP 2026, 2510.22718; STT-GS, 2510.13186); industry players (Gracia, 4DV.ai, a Nokia MPEG GS DASH demo at IBC 2026).
 
 No files were written outside the scratchpad, and the repo was not modified.
-Scratch artifacts are in /tmp/claude-1001/-home-intern-2603056-Desktop-PC-deep-architecture/fab5e796-255d-4580-a95c-24e20bb079ff/scratchpad/proj/ (verify1.tsv, verify2.tsv, txt/*.txt).
+Scratch artifacts are in papers/agent_workdir/ (verify1.tsv, verify2.tsv, txt/*.txt).
 
 ## Reusable local assets
 
