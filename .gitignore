@@ -1,2 +1,5 @@
 # Paper PDFs and the reading agents' downloads (copyrighted; kept local only)
 papers/
+
+# Benchmark outputs; each run stamps its own provenance in meta.json
+runs/
