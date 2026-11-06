@@ -101,7 +101,7 @@ def sample(path, stop):
     with open(path, "w") as out:
         while not stop.is_set():
             now = time.time()
-            out.write(json.dumps({"t": now, "apps": smi("--query-compute-apps=pid,used_memory").splitlines(),
+            out.write(json.dumps({"t": now, "apps": smi("--query-compute-apps=pid,process_name,used_memory").splitlines(),
                                   "gpu": smi("--query-gpu=utilization.gpu,memory.used")}) + "\n")
             out.flush()
             stop.wait(max(0.0, 0.5 - (time.time() - now)))
@@ -144,16 +144,20 @@ def summarise(run, args, procs, t_go):
                       "meets_slo": proc.returncode == 0 and not oom and len(updates) >= expected
                                    and percentile(latency, .95) <= args.slo})
     samples = [json.loads(line) for line in (run / "smi.jsonl").read_text().splitlines()]
-    proc_mib = {}
+    proc_mib, foreign = {}, set()
+    ours = {proc.pid for proc in procs}
     for row in samples:
         for line in row["apps"]:
-            pid, mib = line.split(", ")
+            pid, rest = line.split(", ", 1)
+            name, mib = rest.rsplit(", ", 1)
+            if int(pid) not in ours and not name.endswith("nvidia-cuda-mps-server"):
+                foreign.add(line)  # someone else used the GPU during the run: the run is contaminated
             if mib.isdigit():  # MPS clients can report [N/A]
                 proc_mib[int(pid)] = max(proc_mib.get(int(pid), 0), int(mib))
     util = [int(row["gpu"].split(", ")[0]) for row in samples if t_go and row["t"] >= t_go]
     return {"n": args.n, "k": args.k, "period": args.period, "mps": args.mps, "slo": args.slo, "expected": expected,
             "all_meet_slo": all(entry["meets_slo"] for entry in users), "users": users,
-            "proc_vram_mib_max": proc_mib, "gpu_util_mean": sum(util) / len(util) if util else None,
+            "proc_vram_mib_max": proc_mib, "foreign_procs": sorted(foreign), "gpu_util_mean": sum(util) / len(util) if util else None,
             "gpu_mem_mib_max": max((int(row["gpu"].split(", ")[1]) for row in samples), default=None)}
 
 
@@ -208,10 +212,12 @@ def sweep(args):
               f"weights={entry['weight_bytes']} peak_alloc={entry['peak_alloc']} slo={entry['meets_slo']}")
     print(f"n={args.n} k={args.k} mps={args.mps} all_meet_slo={summary['all_meet_slo']} "
           f"util={summary['gpu_util_mean']} proc_vram_mib={summary['proc_vram_mib_max']}")
+    if summary["foreign_procs"]:
+        print(f"CONTAMINATED, other processes used the GPU: {summary['foreign_procs']}")
     if args.dry_run:  # the smallest check that fails if the harness breaks
         assert all(entry["rc"] == 0 and entry["updates"] == 3 and entry["lat_p95"] is not None
                    for entry in summary["users"]), summary["users"]
-        assert summary["proc_vram_mib_max"] and summary["gpu_util_mean"] is not None, summary
+        assert summary["proc_vram_mib_max"] and summary["gpu_util_mean"] is not None and not summary["foreign_procs"], summary
         print("dry run OK")
 
 
