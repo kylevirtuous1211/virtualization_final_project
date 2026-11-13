@@ -3,3 +3,9 @@ papers/
 
 # Benchmark outputs; each run stamps its own provenance in meta.json
 runs/
+
+# Experiment outputs (layout rule); each run stamps its own provenance in meta.json
+outputs/
+
+# Upstream clones, pinned and never committed (StreamSplat has no license file)
+third_party/
