@@ -1,11 +1,14 @@
 #!/usr/bin/env python
-"""Capacity probe (LOG.md G1, G2): N users share one GPU, each a separate process with its own AnySplat.
+"""Capacity probe (LOG.md G1-G7): N users share one GPU, each a separate process with its own model copy.
 
-  user  : load the model, then every --period s reconstruct the latest --k frames; one JSONL line per update.
+  user  : load the model, then every --period s run one update; one JSONL line per update.
+          anysplat: reconstruct the latest --k frames.
+          streamsplat: estimate depth for the next keyframe, then predict Gaussians for the (previous, next) pair.
   sweep : refuse to run unless the GPU is free, optionally start a user-level MPS daemon, spawn --n users,
           sample nvidia-smi every 0.5 s, then write summary.json into a fresh --run-dir.
 
-Run both modes with the AnySplat env's python (ENV_PY below); the sweep itself only needs the stdlib.
+The sweep itself only needs the stdlib. anysplat users run on the host with ENV_PY; each streamsplat user is
+its own container from STREAMSPLAT_IMAGE (--pid=host, so nvidia-smi on the host sees the user's own PID).
 """
 import argparse, hashlib, json, math, os, shutil, subprocess, sys, tempfile, threading, time
 from pathlib import Path
@@ -17,6 +20,9 @@ ENV_PY = HOME / "Desktop/event_camera_2DGS/envs/anysplat/bin/python"      # torc
 HF_REPO, HF_REV = "lhjiang/anysplat", "d2e8c343672646041ad4ea518184968f94362f01"
 VIDEO = ANYSPLAT / "examples/video/kitti360.mp4"                           # 64 real frames, 448x336
 SIZE = 448
+STREAMSPLAT = (REPO / "third_party/StreamSplat").resolve()  # @ 5d686e9, untracked: the repository has no license
+STREAMSPLAT_IMAGE = "streamsplat:5d686e9"                   # docker/streamsplat/Dockerfile
+TORCH_HUB = HOME / ".cache/torch"                            # holds dinov2_vitb14_reg4 and vgg16, so users run offline
 
 
 def load_frames(path):
@@ -34,9 +40,111 @@ def load_frames(path):
     return torch.stack(out)
 
 
-def user(args):
+def tensor_bytes(*modules):
+    return sum(tensor.numel() * tensor.element_size()
+               for module in modules for tensor in [*module.parameters(), *module.buffers()])
+
+
+def setup_anysplat(args):
+    """Returns (step, weight_bytes); step(update) runs one update and returns the fields it adds to the log."""
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     sys.path.insert(0, str(ANYSPLAT))
+    import torch
+    from src.model.model.anysplat import AnySplat
+    frames = load_frames(args.video)
+    model = AnySplat.from_pretrained(HF_REPO, revision=HF_REV).cuda().eval()
+    for param in model.parameters():
+        param.requires_grad = False
+    windows = len(frames) - args.k + 1
+    assert windows > 0, f"clip has {len(frames)} frames, fewer than k={args.k}"
+
+    def step(update):
+        first = (args.rank * 7 + update) % windows  # each user at its own place in the clip
+        batch = frames[first:first + args.k].cuda().float().div_(255).unsqueeze(0)  # [1, k, 3, 448, 448] in [0, 1]
+        gaussians, _ = model.inference(batch)
+        torch.cuda.synchronize()
+        return {"gaussians": gaussians.means.shape[1]}
+
+    return step, tensor_bytes(model)
+
+
+def load_streamsplat(compile_model, device="cuda"):
+    """StreamSplat's inference model with its released weights, loaded as splat_inference.py does, plus the check
+    that its strict=False load hides: no unexpected key, and missing keys only in the DINO condition encoder."""
+    import torch
+    from safetensors.torch import load_file
+    from configs.options_inference import Options
+    from model.splat_model_inference import SplatModel
+    torch.set_float32_matmul_precision("high")
+    opt = Options()
+    opt.input_frames, opt.output_frames, opt.epoch, opt.compile = 1, 2, 0, compile_model
+    assert (opt.image_height, opt.image_width) == (288, 512), (opt.image_height, opt.image_width)
+    model = SplatModel(opt).to(device)
+    remapped = {}
+    for key, value in load_file(str(STREAMSPLAT / "checkpoints/streamsplat.safetensors"), device=device).items():
+        if "_orig_mod." in key and not compile_model:
+            key = key.replace("_orig_mod.", "")
+        if "_orig_mod." not in key and compile_model:
+            key = key.replace("model.", "model._orig_mod.", 1)
+        remapped[key] = value
+    missing, unexpected = model.load_state_dict(remapped, strict=False)
+    assert not unexpected and not [key for key in missing if "condition_encoder" not in key], (missing, unexpected)
+    return model.eval(), opt
+
+
+def setup_streamsplat(args):
+    """Returns (step, weight_bytes). One update = one new keyframe: Depth Anything V2 depth for it, prepared as
+    preprocess_depth_davis.py does (un-normalised RGB at shorter side 518, min-max to uint8), then Gaussians for
+    the (previous, new) keyframe pair as splat_inference.py prepares it. Frames are resized on the CPU at load time,
+    like AnySplat's; service time is upload plus GPU work. Each user walks the clip from its own offset."""
+    sys.path.insert(0, str(STREAMSPLAT))
+    import imageio.v2 as iio, numpy as np, torch, torch.nn.functional as functional
+    from PIL import Image
+    from model.depth_wrapper import DepthAnythingWrapper
+    model, opt = load_streamsplat(args.compile)
+    depth_model = DepthAnythingWrapper(opt.depth_model_name).to("cuda")
+    height, width = opt.image_height, opt.image_width
+    model_inputs, depth_inputs = [], []
+    for array in iio.get_reader(args.video):
+        image = Image.fromarray(array).convert("RGB")
+        model_inputs.append(torch.from_numpy(np.asarray(image.resize((width, height), Image.BILINEAR)).copy()).permute(2, 0, 1))
+        scale = 518 / min(image.size)
+        shorter = image.resize((int(image.width * scale), int(image.height * scale)), Image.BILINEAR)
+        depth_size = (round(shorter.width / 14) * 14, round(shorter.height / 14) * 14)
+        depth_inputs.append(torch.from_numpy(np.asarray(shorter.resize(depth_size, Image.BILINEAR)).copy()).permute(2, 0, 1))
+    previous, consumed = None, 0
+    times = torch.tensor([[0.0, 1.0]], device="cuda")
+
+    def keyframe(index):
+        rgb = model_inputs[index].cuda().float().div_(255)  # [3, H, W]
+        disparity = depth_model(depth_inputs[index].cuda().float().div_(255).unsqueeze(0))  # [1, h, w]
+        disparity = functional.interpolate(disparity[:, None], size=(height, width), mode="bilinear", align_corners=True)[0]
+        disparity = ((disparity - disparity.min()) / (disparity.max() - disparity.min() + 1e-8) * 255).floor()
+        return rgb, disparity  # [3, H, W], [1, H, W] in 0..255
+
+    def step(update):
+        nonlocal previous, consumed
+        with torch.no_grad():
+            if previous is None:
+                previous = keyframe((args.rank * 7 + consumed) % len(model_inputs))
+                consumed += 1
+            depth_start = time.time()
+            current = keyframe((args.rank * 7 + consumed) % len(model_inputs))
+            torch.cuda.synchronize()
+            depth_seconds = time.time() - depth_start
+            consumed += 1
+            frames = torch.stack([previous[0], current[0]]).unsqueeze(0)  # [1, 2, 3, H, W]
+            depths = torch.stack([previous[1], current[1]]).unsqueeze(0)  # [1, 2, 1, H, W]
+            depths = (depths - depths.min()) / (depths.max() - depths.min() + 1e-8)
+            output = model.forward_gaussians(frames, depths, times)
+            torch.cuda.synchronize()
+        previous = current
+        return {"gaussians": output["pred_gs"]["xyz"].shape[1], "service_depth": depth_seconds}
+
+    return step, tensor_bytes(model, depth_model)
+
+
+def user(args):
     import torch
     out = open(args.out, "w")
 
@@ -45,23 +153,7 @@ def user(args):
         out.flush()
 
     try:
-        from src.model.model.anysplat import AnySplat
-        frames = load_frames(args.video)
-        model = AnySplat.from_pretrained(HF_REPO, revision=HF_REV).cuda().eval()
-        for param in model.parameters():
-            param.requires_grad = False
-        weight_bytes = sum(tensor.numel() * tensor.element_size()
-                           for tensor in [*model.parameters(), *model.buffers()])
-        windows = len(frames) - args.k + 1
-        assert windows > 0, f"clip has {len(frames)} frames, fewer than k={args.k}"
-
-        def step(update):
-            first = (args.rank * 7 + update) % windows  # each user at its own place in the clip
-            batch = frames[first:first + args.k].cuda().float().div_(255).unsqueeze(0)  # [1, k, 3, 448, 448] in [0, 1]
-            gaussians, _ = model.inference(batch)
-            torch.cuda.synchronize()
-            return gaussians.means.shape[1]
-
+        step, weight_bytes = (setup_streamsplat if args.model == "streamsplat" else setup_anysplat)(args)
         for update in range(args.warmup):
             step(update)
         torch.cuda.reset_peak_memory_stats()
@@ -78,12 +170,12 @@ def user(args):
                 break
             time.sleep(max(0.0, release - time.time()))
             start = time.time()
-            count = step(update)
+            fields = step(update)
             end = time.time()
             # latency includes waiting behind this user's own late updates; service is compute only
             emit(event="update", j=update, release=release, start=start, end=end, latency=end - release,
-                 service=end - start, gaussians=count, peak_alloc=torch.cuda.max_memory_allocated(),
-                 reserved=torch.cuda.memory_reserved())
+                 service=end - start, peak_alloc=torch.cuda.max_memory_allocated(),
+                 reserved=torch.cuda.memory_reserved(), **fields)
             update += 1
     except (torch.cuda.OutOfMemoryError, RuntimeError) as error:
         if "out of memory" not in str(error).lower():
@@ -110,12 +202,17 @@ def sample(path, stop):
 def provenance(args):
     def git(where, *command):
         return subprocess.run(["git", "-C", str(where), *command], capture_output=True, text=True).stdout.strip()
-    return {"argv": sys.argv, "args": vars(args), "commit": git(REPO, "rev-parse", "HEAD"),
-            "dirty": bool(git(REPO, "status", "--porcelain")), "anysplat_commit": git(ANYSPLAT, "rev-parse", "HEAD"),
-            "hf": f"{HF_REPO}@{HF_REV}", "video": str(args.video),
-            "env_freeze_sha256": hashlib.sha256((ENV_PY.parent.parent / "freeze.txt").read_bytes()).hexdigest(),
-            "gpu": smi("--query-gpu=name,driver_version,memory.total"),
-            "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    common = {"argv": sys.argv, "args": vars(args), "commit": git(REPO, "rev-parse", "HEAD"),
+              "dirty": bool(git(REPO, "status", "--porcelain")), "video": str(args.video),
+              "gpu": smi("--query-gpu=name,driver_version,memory.total"),
+              "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    if args.model == "streamsplat":
+        image = subprocess.run(["docker", "image", "inspect", "--format", "{{.Id}}", STREAMSPLAT_IMAGE],
+                               capture_output=True, text=True).stdout.strip()
+        return {**common, "streamsplat_commit": git(STREAMSPLAT, "rev-parse", "HEAD"), "image": f"{STREAMSPLAT_IMAGE} {image}",
+                "weights_sha256": (STREAMSPLAT / "checkpoints/SHA256SUMS").read_text()}
+    return {**common, "anysplat_commit": git(ANYSPLAT, "rev-parse", "HEAD"), "hf": f"{HF_REPO}@{HF_REV}",
+            "env_freeze_sha256": hashlib.sha256((ENV_PY.parent.parent / "freeze.txt").read_bytes()).hexdigest()}
 
 
 def percentile(values, q):
@@ -134,10 +231,12 @@ def summarise(run, args, procs, t_go):
         ready = next((row for row in rows if row["event"] == "ready"), {})
         latency, service = [row["latency"] for row in updates], [row["service"] for row in updates]
         oom = any(row["event"] == "oom" for row in rows)
-        users.append({"rank": rank, "pid": proc.pid, "rc": proc.returncode, "oom": oom,
+        # the PID the user process reports itself: under docker --pid=host that is its host PID, not the client's
+        users.append({"rank": rank, "pid": rows[0]["pid"] if rows else proc.pid, "rc": proc.returncode, "oom": oom,
                       "updates": len(updates), "expected": expected,
                       "lat_p50": percentile(latency, .5), "lat_p95": percentile(latency, .95),
                       "svc_p50": percentile(service, .5), "svc_p95": percentile(service, .95),
+                      "svc_depth_p50": percentile([row["service_depth"] for row in updates if "service_depth" in row], .5),
                       "gaussians_p50": percentile([row["gaussians"] for row in updates], .5),
                       "weight_bytes": ready.get("weight_bytes"),
                       "peak_alloc": max((row["peak_alloc"] for row in updates), default=None),
@@ -145,7 +244,7 @@ def summarise(run, args, procs, t_go):
                                    and percentile(latency, .95) <= args.slo})
     samples = [json.loads(line) for line in (run / "smi.jsonl").read_text().splitlines()]
     proc_mib, foreign = {}, set()
-    ours = {proc.pid for proc in procs}
+    ours = {entry["pid"] for entry in users}
     for row in samples:
         for line in row["apps"]:
             pid, rest = line.split(", ", 1)
@@ -164,6 +263,7 @@ def summarise(run, args, procs, t_go):
 def sweep(args):
     if args.dry_run:
         args.n, args.max_updates, args.warmup, args.period = 2, 3, 1, 1.0
+    args.video = str(Path(args.video).resolve())  # also the mount path inside a container
     run = Path(args.run_dir).resolve()
     if run.exists():
         sys.exit(f"{run} exists; every run gets a fresh directory")
@@ -180,24 +280,43 @@ def sweep(args):
         (run / "mps/log").mkdir(parents=True)
         subprocess.run(["nvidia-cuda-mps-control", "-d"], env=env, check=True)
     (run / "meta.json").write_text(json.dumps(provenance(args), indent=1, default=str))
-    forwarded = ["--n", args.n, "--k", args.k, "--period", args.period, "--duration", args.duration,
-                 "--max-updates", args.max_updates, "--warmup", args.warmup, "--video", args.video, "--barrier", run]
-    procs = [subprocess.Popen([str(ENV_PY), __file__, "user", "--rank", str(rank), "--out", str(run / f"user{rank}.jsonl"),
+    forwarded = ["--model", args.model, "--n", args.n, "--k", args.k, "--period", args.period, "--duration", args.duration,
+                 "--max-updates", args.max_updates, "--warmup", args.warmup, "--video", args.video, "--barrier", run,
+                 "--compile" if args.compile else "--no-compile"]
+    containers = [f"capacity-{os.getpid()}-{rank}" for rank in range(args.n)] if args.model == "streamsplat" else []
+
+    def launcher(rank):
+        if args.model == "anysplat":
+            return [str(ENV_PY)]
+        # one container per user; the same absolute paths inside, so nothing is translated
+        mounts = [f"{REPO}:{REPO}:ro", f"{STREAMSPLAT}:{STREAMSPLAT}:ro", f"{TORCH_HUB}:/torch_home:ro",
+                  f"{Path(args.video).resolve()}:{Path(args.video).resolve()}:ro", f"{run}:{run}",
+                  *([f"{pipe}:{pipe}"] if pipe else [])]
+        return ["docker", "run", "--rm", "--name", containers[rank], "--gpus", "all", "--network", "none",
+                "--pid=host", "--ipc=host", "--user", f"{os.getuid()}:{os.getgid()}",
+                "-e", "HOME=/tmp", "-e", "TORCH_HOME=/torch_home", "-e", f"USER={os.environ.get('USER', 'user')}",
+                "-e", "CUDA_MPS_PIPE_DIRECTORY", "-e", "CUDA_MPS_LOG_DIRECTORY",
+                *[part for mount in mounts for part in ("-v", mount)], STREAMSPLAT_IMAGE, "python"]
+
+    procs = [subprocess.Popen([*launcher(rank), __file__, "user", "--rank", str(rank), "--out", str(run / f"user{rank}.jsonl"),
                                *map(str, forwarded)], env=env, stdout=open(run / f"user{rank}.log", "w"),
                               stderr=subprocess.STDOUT) for rank in range(args.n)]
     stop, t_go = threading.Event(), None
     threading.Thread(target=sample, args=(run / "smi.jsonl", stop), daemon=True).start()
+    ready_seconds = 1800 if args.model == "streamsplat" else 900  # every streamsplat user compiles its own model
     try:
-        deadline = time.time() + 900
+        deadline = time.time() + ready_seconds
         while not all(Path(run, f"ready.{rank}").exists() or proc.poll() is not None for rank, proc in enumerate(procs)):
             if time.time() > deadline:
-                raise SystemExit("users never got ready within 900 s")
+                raise SystemExit(f"users never got ready within {ready_seconds} s")
             time.sleep(0.2)
         t_go = time.time() + 1.0
         Path(run, "go").write_text(repr(t_go))
         for proc in procs:
             proc.wait()
     finally:
+        for name in containers:  # killing a docker client leaves its container running
+            subprocess.run(["docker", "kill", name], capture_output=True)
         for proc in procs:
             if proc.poll() is None:
                 proc.kill()
@@ -227,6 +346,9 @@ def sweep(args):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["user", "sweep"])
+    parser.add_argument("--model", choices=["anysplat", "streamsplat"], default="anysplat")
+    parser.add_argument("--compile", action=argparse.BooleanOptionalAction, default=True,
+                        help="streamsplat only: torch.compile the predictor (its inference default)")
     parser.add_argument("--n", type=int, default=1)
     parser.add_argument("--k", type=int, default=8, help="frames per update")
     parser.add_argument("--period", type=float, default=1.0, help="seconds between a user's updates; 0 = back to back")
