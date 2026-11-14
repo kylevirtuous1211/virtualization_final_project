@@ -351,11 +351,185 @@ It removes G4's block on G5-G7, as the revised plan registered.
 
 ---
 
+## G5 - One StreamSplat user costs 0.19 s of GPU per keyframe and 4.0 GiB on the RTX 6000 Ada, twice the predicted time, and a single back-to-back user already runs the GPU at 5.2 updates/s
+
+**Question.**
+What does one StreamSplat user cost on the RTX 6000 Ada, with torch.compile on and off?
+The StreamSplat analogue of G1.
+
+**Setup.**
+- Lane: exploratory; plan `misty-painting-summit`, approved 2026-11-13; registration in the runner header (e760d10), run after G8 cleared the gate.
+- `bench/capacity.py --model streamsplat`: one user in its own container (`streamsplat:5d686e9`), back to back (`--period 0`), 3 warm-up updates, then 20 measured updates, once with compile on (the authors' default) and once off.
+- One update = one new keyframe of `examples/video/kitti360.mp4` (the clip G1-G3 use) at the checkpoint's 512x288: Depth Anything V2 ViT-L depth for it, then Gaussians for the (previous, new) keyframe pair; service time is upload plus GPU work, `service_depth` the depth part; no rendering, as in G1.
+- KITTI-360 is out of distribution for this model; the cost depends only on the input shape, and quality is not measured here.
+- Run 2026-11-14 07:06-07:08Z at 8090b64, clean tree, `foreign_procs` empty.
+
+**Command.**
+```
+bash experiments/capacity/run_G5_streamsplat-cost.sh           # resumable
+bash experiments/capacity/run_G5_streamsplat-cost.sh metrics   # re-derives outputs/capacity/G5/metrics.json
+```
+
+**Result** (one run per arm, 20 updates each).
+
+| arm | service p50 / p95 (s) | depth p50 (s) | depth share | updates/s back to back | weights (B) | peak allocated (MiB) | process VRAM, nvidia-smi (MiB) | Gaussians |
+|---|---|---|---|---|---|---|---|---|
+| compile | 0.190 / 0.199 | 0.049 | 26% | 5.20 | 2,423,496,008 | 2,870 | 4,094 | 73,728 |
+| no compile | 0.198 / 0.204 | 0.049 | 25% | 5.02 | 2,423,496,008 | 2,834 | 3,846 | 73,728 |
+
+- The Gaussian part is about 0.14-0.15 s and depth about 0.05 s; compile saves 4% of service time and costs 248 MiB.
+- `metrics.json` also lists a "capacity" of 0 for both arms: with `--period 0` every update queues behind the previous one, so that SLO field means nothing here and is not a result.
+- Bug check, a one-off probe: `forward_gaussians` alone, one pair at batch 1 with inputs already on the GPU, compile off, takes p50 0.152 s (min 0.149, max 0.163, n = 20; `probes/streamsplat_forward_timing.py`, command in its docstring).
+  That matches the harness's Gaussian part, so the harness adds no measurable overhead and 0.19 s is the model's cost on this GPU.
+
+**Null.**
+Nothing to subtract; this is the first StreamSplat cost measurement here. G1's k = 8 AnySplat user (0.395 s, 8,640 MiB) is the bound the "lighter" claim is checked against.
+
+**Against the predictions registered in the runner header.**
+- Service p50 0.09 s (range 0.06-0.15): **refuted** (0.190 and 0.198 s).
+  The paper's 0.049 s per frame was measured on an unnamed GPU and excludes depth; whether it is per pair at batch 1 or amortised over a batch is not tested here.
+- Depth 30-40% of service: **refuted, narrowly** (26% and 25%).
+- Weights 2.39 GB: **holds** (2.42 GB).
+- Process VRAM about 4,200 MiB (3,500-5,000): **holds** (4,094 and 3,846 MiB).
+- "Lighter than AnySplat at k = 8", refuted if service p50 > 0.3 s or VRAM > 8,000 MiB: **holds** (0.19 s against 0.395 s, 4,094 against 8,640 MiB).
+
+**Cost.**
+2 runs, 3 min wall clock, local GPU only; the probe took about 1 min.
+
+**What it overturns.**
+Nothing measured before; it doubles the per-update cost that G6 and G7's predictions assumed (0.09 s).
+
+---
+
+## G6 - At one keyframe per user per second the RTX 6000 Ada serves 4 StreamSplat users under time-slicing and 4 under MPS; compute, not memory, is the limit
+
+**Question.**
+How many StreamSplat users, one container each, does the RTX 6000 Ada serve at one keyframe per user per second, under time-slicing and under MPS?
+The StreamSplat analogue of G2.
+
+**Setup.**
+- Lane: exploratory; registration in the runner header (e760d10), run after G8 cleared the gate.
+- As G5 with compile on; each user releases one update per second for 60 s after 3 warm-ups; phases evenly staggered; arms `ts` and `mps` interleaved per N, 2 repeats; registered grid N in 1 2 4 6 8 10 12 14.
+- MPS: one user-started daemon, shared by the containers through the bind-mounted pipe directory, `--ipc=host` and the same UID; each container runs with `--pid=host`, so the host's nvidia-smi sees every user's own PID.
+- Registered: SLO p95 ≤ 1.0 s, no OOM, 60/60 updates; capacity and stop rule as G2.
+- Run 2026-11-14 07:08-08:14Z at 8090b64, clean tree; `foreign_procs` empty in all 20 runs, none redone; no OOM, no crash.
+
+**Command.**
+```
+bash experiments/capacity/run_G6_streamsplat-1hz.sh           # resumable
+bash experiments/capacity/run_G6_streamsplat-1hz.sh metrics   # re-derives outputs/capacity/G6/metrics.json
+```
+
+**Result** (one row per run; maxima and ranges over the N users).
+
+| arm | N | rep | p95 latency, max over users (s) | mean service p50 (s) | mean depth p50 (s) | min updates / 60 | total updates/s | per-user VRAM min-max (MiB) | GPU memory max (MiB) | SLO |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ts | 1 | 1 | 0.193 | 0.180 | 0.041 | 60 | 1.01 | 4,094-4,094 | 4,134 | pass |
+| ts | 1 | 2 | 0.193 | 0.182 | 0.041 | 60 | 1.01 | 4,094-4,094 | 4,134 | pass |
+| mps | 1 | 1 | 0.191 | 0.179 | 0.041 | 60 | 1.01 | 4,094-4,094 | 4,163 | pass |
+| mps | 1 | 2 | 0.189 | 0.181 | 0.041 | 60 | 1.01 | 4,094-4,094 | 4,163 | pass |
+| ts | 2 | 1 | 0.193 | 0.182 | 0.041 | 60 | 2.01 | 4,094-4,094 | 8,233 | pass |
+| ts | 2 | 2 | 0.193 | 0.182 | 0.041 | 60 | 2.01 | 4,094-4,094 | 8,233 | pass |
+| mps | 2 | 1 | 0.195 | 0.182 | 0.041 | 60 | 2.01 | 4,094-4,094 | 8,258 | pass |
+| mps | 2 | 2 | 0.194 | 0.183 | 0.041 | 60 | 2.01 | 4,094-4,094 | 8,258 | pass |
+| ts | 4 | 1 | 0.198 | 0.184 | 0.042 | 60 | 4.00 | 4,094-4,094 | 16,432 | pass |
+| ts | 4 | 2 | 0.196 | 0.184 | 0.042 | 60 | 4.00 | 4,094-4,094 | 16,432 | pass |
+| mps | 4 | 1 | 0.197 | 0.182 | 0.042 | 60 | 4.00 | 4,094-4,094 | 16,448 | pass |
+| mps | 4 | 2 | 0.196 | 0.182 | 0.042 | 60 | 4.00 | 4,094-4,094 | 16,448 | pass |
+| ts | 6 | 1 | 13.048 | 1.271 | 0.311 | 48 | 4.73 | 4,094-4,094 | 24,630 | fail |
+| ts | 6 | 2 | 12.951 | 1.269 | 0.317 | 48 | 4.73 | 4,094-4,094 | 24,630 | fail |
+| mps | 6 | 1 | 13.928 | 1.296 | 0.491 | 47 | 4.65 | 4,094-4,094 | 24,637 | fail |
+| mps | 6 | 2 | 13.992 | 1.293 | 0.499 | 47 | 4.65 | 4,094-4,094 | 24,637 | fail |
+| ts | 8 | 1 | 25.173 | 1.699 | 0.425 | 36 | 4.72 | 4,094-4,094 | 32,831 | fail |
+| ts | 8 | 2 | 25.280 | 1.699 | 0.427 | 36 | 4.71 | 4,094-4,094 | 32,831 | fail |
+| mps | 8 | 1 | 25.868 | 1.732 | 0.708 | 35 | 4.62 | 4,094-4,094 | 32,828 | fail |
+| mps | 8 | 2 | 25.997 | 1.733 | 0.678 | 35 | 4.63 | 4,094-4,094 | 32,828 | fail |
+
+- **Capacity: 4 under `ts` and 4 under `mps`, in both repeats.**
+  Both fail at N = 6 by latency with no OOM; the stop rule ended the sweep after N = 8, so 10, 12 and 14 were not run.
+  N = 5 is not in the grid, so the edge lies between 4 and 6; the saturated throughput below makes 5 users at 1 update/s unlikely to pass, but that is an inference, not a run.
+- Saturated throughput: `ts` 4.71-4.73 and `mps` 4.62-4.65 updates/s at N = 6-8, below the 5.20 one back-to-back user reaches (G5), so sharing costs 9% (`ts`) to 11% (`mps`) of the GPU's throughput.
+  MPS is 1.7-1.9% below time-slicing here (n = 2).
+- Below the edge, p95 stays at 0.189-0.198 s for N = 1-4 under both arms, close to the service time.
+- Every user's VRAM is 4,094 MiB under both arms, and 8 users peak at 32,831 MiB of 49,140 MiB, so the memory bound is about 12 users, three times the compute bound.
+
+**Null.**
+`ts` is the matched control for `mps`; N = 1 is the reference for slowdown.
+
+**Against the prediction registered in the runner header.**
+- ts 9 and mps 10-11 users, with the limit moving from compute (G2) to memory: **refuted** by the registered criterion (either capacity ≤ 5): both are 4, and the limit is compute.
+  The prediction used 0.09 s per update; G5's 0.19 s alone puts the compute bound near 5.
+
+**Cost.**
+20 runs, 66 min wall clock, local GPU only.
+
+**What it overturns.**
+The registered expectation that StreamSplat moves the capacity limit from compute to memory; on this GPU it stays compute.
+
+---
+
+## G7 - At three keyframes per user per second the RTX 6000 Ada serves 1 StreamSplat user under time-slicing and 1 under MPS
+
+**Question.**
+At three keyframes per user per second, close to the paper's keyframe rate, does MPS serve more StreamSplat users than time-slicing?
+
+**Setup.**
+- Lane: exploratory; registration in the runner header (e760d10), run after G8 cleared the gate.
+- As G6, but a period of 1/3 s (passed as 0.3333333333333333, so the expected and released counts are both 180) and the registered grid N in 1 2 3 4 6.
+- Registered: SLO p95 ≤ 1/3 s, no OOM, 180/180 updates; capacity and stop rule as G6.
+- Run 2026-11-14 08:14-08:50Z at 8090b64, clean tree; `foreign_procs` empty in all 12 runs, none redone; no OOM, no crash.
+
+**Command.**
+```
+bash experiments/capacity/run_G7_streamsplat-3hz.sh           # resumable
+bash experiments/capacity/run_G7_streamsplat-3hz.sh metrics   # re-derives outputs/capacity/G7/metrics.json
+```
+
+**Result** (one row per run; maxima and ranges over the N users).
+
+| arm | N | rep | p95 latency, max over users (s) | mean service p50 (s) | mean depth p50 (s) | min updates / 180 | total updates/s | per-user VRAM min-max (MiB) | GPU memory max (MiB) | SLO |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ts | 1 | 1 | 0.194 | 0.184 | 0.041 | 180 | 3.01 | 4,094-4,094 | 4,134 | pass |
+| ts | 1 | 2 | 0.194 | 0.182 | 0.041 | 180 | 3.01 | 4,094-4,094 | 4,134 | pass |
+| mps | 1 | 1 | 0.191 | 0.181 | 0.041 | 180 | 3.01 | 4,094-4,094 | 4,163 | pass |
+| mps | 1 | 2 | 0.195 | 0.182 | 0.041 | 180 | 3.01 | 4,094-4,094 | 4,163 | pass |
+| ts | 2 | 1 | 11.448 | 0.415 | 0.098 | 146 | 4.83 | 4,094-4,094 | 8,233 | fail |
+| ts | 2 | 2 | 11.650 | 0.416 | 0.110 | 145 | 4.81 | 4,094-4,094 | 8,233 | fail |
+| mps | 2 | 1 | 10.312 | 0.405 | 0.128 | 149 | 4.94 | 4,094-4,094 | 8,258 | fail |
+| mps | 2 | 2 | 10.241 | 0.406 | 0.128 | 149 | 4.95 | 4,094-4,094 | 8,258 | fail |
+| ts | 3 | 1 | 27.553 | 0.630 | 0.167 | 96 | 4.77 | 4,094-4,094 | 12,332 | fail |
+| ts | 3 | 2 | 27.596 | 0.630 | 0.165 | 96 | 4.78 | 4,094-4,094 | 12,332 | fail |
+| mps | 3 | 1 | 27.316 | 0.624 | 0.216 | 97 | 4.81 | 4,094-4,094 | 12,353 | fail |
+| mps | 3 | 2 | 27.212 | 0.623 | 0.203 | 97 | 4.83 | 4,094-4,094 | 12,353 | fail |
+
+- **Capacity: 1 under `ts` and 1 under `mps`, in both repeats.**
+  Both fail at N = 2 by latency with no OOM; the stop rule ended the sweep after N = 3, so 4 and 6 were not run.
+- One user at 3 updates/s needs 3 x 0.18 = 0.55 of the GPU, so two need 6 updates/s against a saturated 4.77-4.95; the queue grows and p95 reaches 10-12 s within the 60 s run.
+- MPS delivers 2-3% more throughput than time-slicing at N = 2 (4.94-4.95 against 4.81-4.83 updates/s) and 0.6-1.3% more at N = 3, the opposite sign to G6 (n = 2 per point); either way the difference is a few percent.
+
+**Null.**
+`ts` is the matched control for `mps`; N = 1 is the reference for slowdown.
+
+**Against the prediction registered in the runner header.**
+- ts 3 and mps 3-4 users: **refuted** by the registered criterion (mps equals ts in both repeats); both are 1.
+  As in G6, the prediction used 0.09 s per update; at 0.19 s the 27% per-user GPU share it assumed is 55%, so the low-utilisation regime it meant to test does not exist at this rate.
+
+**Cost.**
+12 runs, 36 min wall clock, local GPU only.
+
+**What it overturns.**
+Plan prediction 1 (MPS serves at least one more user) is refuted again, now for StreamSplat at 3 updates/s; G2, G3, G6 and G7 all find equal capacity under the two arms.
+
+---
+
 ## Refuted claims
 
 | Claim | Refuted by | Note |
 |---|---|---|
 | Per-user VRAM is dominated by the user's own copy of the weights (plan prediction 2) | G1 | Holds at k = 2 (59% weights), fails at k = 8 (33%) and k = 16 (29%). |
-| MPS serves at least one more user than time-slicing (plan prediction 1) | G2, G3 | Both serve 2 at k = 8 and 1 update/s (G2) and 5 at k = 2 and 2 updates/s (G3). |
+| MPS serves at least one more user than time-slicing (plan prediction 1) | G2, G3, G6, G7 | Equal capacity in every setting: AnySplat 2 at k = 8 and 1 update/s (G2), 5 at k = 2 and 2 updates/s (G3); StreamSplat 4 at 1 update/s (G6), 1 at 3 updates/s (G7). |
 | At k = 2, time-slicing tops out near one user's rate, 1 / 0.122 s = 8.2 updates/s (G3 P2) | G3 | Step 0 reached 10.06 updates/s with 4 users back to back. |
 | The released StreamSplat clears 30 dB keyframe PSNR on DAVIS `bear`, from its mp4 outputs at 512x288 (G4 gate) | G4 | 27.51 dB. By the paper's protocol (256x256, tensors, val split), G8 gives 37.76 dB on val and 35.94 dB on `bear`. |
+| One StreamSplat update (depth plus a keyframe pair) costs about 0.09 s on the RTX 6000 Ada (G5) | G5 | 0.190 s with compile, 0.198 s without; `forward_gaussians` alone is 0.152 s. |
+| With StreamSplat at 1 update/s, the capacity limit moves from compute to memory, about 9-11 users (G6) | G6 | 4 users under both arms; compute-bound at about 4.7 updates/s, memory would allow about 12. |
+| At 3 updates/s, a StreamSplat user leaves the GPU mostly idle, so MPS serves more users (G7) | G7 | 1 user under both arms; one user takes 55% of the GPU. |
