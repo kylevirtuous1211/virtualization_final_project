@@ -7,6 +7,7 @@ The prefix `V` used in `docs/implementation_plan.md` belongs to the earlier stre
 The index of refuted claims is at the foot of this file; new entries go above it.
 
 Lane: G1 and G2 are exploratory numbers (learning lane), approved in plan mode on 2026-11-06 (plan `misty-painting-summit`).
+G3 is exploratory too, approved in plan mode on 2026-11-13 (the same plan file, reused).
 They are not report results.
 
 ## G1 - One AnySplat user costs 0.12-0.86 s of GPU per update and 4.6-9.4 GiB, depending on frames per update
@@ -128,9 +129,115 @@ It does not test small k, where one user leaves the GPU idle (56% at k = 2 in G1
 
 ---
 
+## G3 - At k = 2 and 2 updates/s the RTX 6000 Ada serves 5 AnySplat users under time-slicing and 5 under MPS; time-slicing alone already fills most of one user's idle GPU time
+
+**Question.**
+At k = 2 frames per update, where one AnySplat user leaves part of the GPU idle (G1), does MPS serve more users than time-slicing?
+
+**Setup.**
+- Lane: exploratory, like G1 and G2; plan `misty-painting-summit`, approved in plan mode on 2026-11-13.
+- Runner `experiments/capacity/run_G3_k2-mps.sh` (a4261cd); its header holds the registration and was committed before any run.
+- Same model, weights, env and input as G1 and G2; k = 2; each user releases one update every 0.5 s for 60 s (120 updates) after 3 warm-up updates; phases evenly staggered.
+- Arms `ts` and `mps` as in G2, interleaved per N, 2 repeats per point; registered grid N in 1 2 3 4 5 6 7 8 10 12.
+- Registered: SLO p95 ≤ 1.0 s, no OOM, 120/120 updates; a secondary SLO p95 ≤ 0.5 s is reported only; capacity = the largest N where both repeats pass; an arm stops after two consecutive N where neither repeat passes.
+- Step 0, registered as a gate: 4 users back to back, 40 updates each, per arm; throughput = 160 / (last end - first start); a `ts` throughput ≥ 14 updates/s would have stopped the run.
+- Code: step 0 `ts` ran at a4261cd (2026-11-13 23:56-23:59Z); every other kept run at 75884fd (2026-11-14 00:16-01:38Z), all with clean trees (`meta.json`).
+  75884fd changes only where the MPS daemon keeps its sockets (see Failed attempts); the `ts` path is unchanged, so the header's "capacity.py unchanged since G2" holds for `ts` and not for `mps`.
+- No kept run saw another GPU process (`foreign_procs` empty in all 30), so none was redone; no OOM and no crash in any run.
+
+**Command.**
+```
+bash experiments/capacity/run_G3_k2-mps.sh           # resumable
+bash experiments/capacity/run_G3_k2-mps.sh metrics   # re-derives outputs/capacity/G3/metrics.json
+```
+Every number below is in `outputs/capacity/G3/metrics.json` (`step0_updates_per_s`, `capacity`, `points.<arm>.<N>.<rep>`).
+
+**Step 0.**
+`ts` 10.06 updates/s and `mps` 10.92 updates/s, below the 14 updates/s gate, so the sweep ran at 0.5 s as registered.
+
+**Result** (one row per run; maxima and ranges over the N users).
+
+| arm | N | rep | p95 latency, max over users (s) | mean service p50 (s) | min updates / 120 | total updates/s | per-user VRAM min-max (MiB) | GPU memory max (MiB) | SLO 1 s | SLO 0.5 s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ts | 1 | 1 | 0.128 | 0.126 | 120 | 2.01 | 3,954-3,954 | 3,996 | pass | pass |
+| ts | 1 | 2 | 0.134 | 0.129 | 120 | 2.01 | 3,954-3,954 | 3,994 | pass | pass |
+| mps | 1 | 1 | 0.135 | 0.128 | 120 | 2.01 | 4,726-4,726 | 4,023 | pass | pass |
+| mps | 1 | 2 | 0.133 | 0.130 | 120 | 2.01 | 4,726-4,726 | 4,023 | pass | pass |
+| ts | 2 | 1 | 0.136 | 0.126 | 120 | 4.01 | 3,954-4,804 | 8,831 | pass | pass |
+| ts | 2 | 2 | 0.142 | 0.130 | 120 | 4.01 | 3,954-3,954 | 7,953 | pass | pass |
+| mps | 2 | 1 | 0.128 | 0.126 | 120 | 4.01 | 4,528-4,804 | 7,978 | pass | pass |
+| mps | 2 | 2 | 0.131 | 0.127 | 120 | 4.01 | 4,008-4,804 | 9,026 | pass | pass |
+| ts | 3 | 1 | 0.141 | 0.128 | 120 | 6.00 | 3,954-4,400 | 11,912 | pass | pass |
+| ts | 3 | 2 | 0.138 | 0.129 | 120 | 6.00 | 3,954-4,726 | 12,684 | pass | pass |
+| mps | 3 | 1 | 0.134 | 0.129 | 120 | 6.00 | 3,954-3,954 | 12,115 | pass | pass |
+| mps | 3 | 2 | 0.137 | 0.129 | 120 | 6.00 | 3,954-5,002 | 11,933 | pass | pass |
+| ts | 4 | 1 | 0.150 | 0.132 | 120 | 8.00 | 3,954-4,804 | 16,721 | pass | pass |
+| ts | 4 | 2 | 0.147 | 0.138 | 120 | 8.00 | 3,954-3,954 | 16,643 | pass | pass |
+| mps | 4 | 1 | 0.136 | 0.128 | 120 | 8.00 | 3,954-3,954 | 15,888 | pass | pass |
+| mps | 4 | 2 | 0.152 | 0.131 | 120 | 8.00 | 3,954-3,958 | 16,660 | pass | pass |
+| ts | 5 | 1 | 0.318 | 0.243 | 120 | 9.98 | 3,954-5,002 | 21,375 | pass | pass |
+| ts | 5 | 2 | 0.330 | 0.238 | 120 | 9.98 | 3,954-4,726 | 21,453 | pass | pass |
+| mps | 5 | 1 | 0.177 | 0.170 | 120 | 9.99 | 3,954-4,726 | 19,974 | pass | pass |
+| mps | 5 | 2 | 0.180 | 0.171 | 120 | 9.99 | 3,954-4,726 | 21,386 | pass | pass |
+| ts | 6 | 1 | 9.542 | 0.595 | 102 | 10.07 | 4,726-4,832 | 25,412 | fail | fail |
+| ts | 6 | 2 | 9.581 | 0.595 | 102 | 10.07 | 4,726-4,804 | 24,640 | fail | fail |
+| mps | 6 | 1 | 8.490 | 0.586 | 104 | 10.28 | 4,726-4,726 | 26,113 | fail | fail |
+| mps | 6 | 2 | 8.464 | 0.584 | 104 | 10.29 | 4,726-4,726 | 25,915 | fail | fail |
+| ts | 7 | 1 | 16.611 | 0.693 | 87 | 10.09 | 4,726-4,804 | 28,799 | fail | fail |
+| ts | 7 | 2 | 16.603 | 0.693 | 87 | 10.09 | 4,726-4,726 | 29,293 | fail | fail |
+| mps | 7 | 1 | 16.106 | 0.689 | 88 | 10.18 | 4,726-4,804 | 31,612 | fail | fail |
+| mps | 7 | 2 | 16.006 | 0.687 | 88 | 10.20 | 4,726-4,804 | 31,794 | fail | fail |
+
+- **Capacity: 5 under `ts` and 5 under `mps`, in both repeats** (the any-repeat capacity is also 5 for both).
+  Both arms fail at N = 6 by latency, with no OOM; the stop rule ended the sweep after N = 7, so N = 8, 10 and 12 were not run.
+- Saturated throughput is about 10.1 updates/s under both arms: `ts` 10.07-10.09 and `mps` 10.18-10.29 at N = 6-7, against 12-14 demanded.
+  MPS gains 1-2% in the sweep and 8.5% in step 0, far short of the 2 updates/s a sixth user needs.
+- Up to N = 4 both arms keep p95 at 0.128-0.152 s, close to the N = 1 service time (0.126-0.130 s).
+- At N = 5, where demand (10 updates/s) meets the ceiling, MPS cuts p95 from 0.318-0.330 s to 0.177-0.180 s and the mean service p50 from 0.238-0.243 s to 0.170-0.171 s, in both repeats (n = 2).
+  This is the only point in G1-G3 where MPS measurably helps a user, and it is a latency gain at a fixed N, not a capacity gain.
+- Per-user VRAM clusters at a few values between 3,954 and 5,002 MiB under both arms, so a per-user memory difference at one N is an allocator step, not an arm effect.
+  GPU memory at N = 7 was 28,799-31,794 MiB of 49,140 MiB.
+- `gpu_util_mean` is not usable here: at N = 1 it reads 0.7% and 67.5% for two otherwise identical `ts` repeats and -1 (no sample) for one `mps` repeat, so it is left out of the table.
+
+**Null.**
+`ts` is the matched control for `mps` (one factor differs); N = 1 is the reference for slowdown.
+
+**Against the predictions registered in the runner header.**
+- P1, capacity(mps) ≥ capacity(ts) + 1: **refuted**.
+  Both are 5 and both fail at 6 by latency, which is the registered refutation case.
+- P2, `ts` ceiling 8.2 ± 0.4 updates/s: **refuted** (10.06, above the 9.0 bound).
+  8.2 was 1 / 0.122 s, G1's k = 2 service time, which assumed time-slicing cannot overlap users.
+  A likely reading is that one user's CPU-side gaps (G1's 44% idle) are filled by other processes' kernels without MPS; that explains the number but is not a tested mechanism.
+- P3, `mps` ceiling ≥ 9.5 updates/s: holds as stated (10.92), but its premise does not.
+  The threshold was set against a `ts` ceiling of 8.2; `ts` alone reaches 10.06, so MPS's margin is 0.86 updates/s.
+- P4, MPS does not lower per-user memory (median within -300..+600 MiB of `ts` at N = 2 and 4): **not refuted** by the registered criterion, which needed `mps` ≥ 300 MiB lower at both N.
+  Means of the two repeats' medians: N = 2 `mps` 4,536 against `ts` 4,167 MiB (+370); N = 4 `mps` 3,954 against `ts` 4,360 MiB (-406, outside the band).
+  With the discrete levels above, this reads as no arm effect.
+- P5, the memory wall lies between N = 8 and 10: **not tested**; the stop rule ended the sweep at N = 7.
+- P6, `mps` N = 1 service p50 ≤ 0.128 s: **refuted in one of two repeats** (0.128 and 0.130 s).
+  Against the matched `ts` N = 1 (0.126 and 0.129 s), MPS's single-user overhead is about 1%, inside the 5% the prediction was about; the absolute threshold came from G1 (0.122 s x 1.05), and this session's `ts` is itself 3-5% slower than G1.
+
+**Failed attempts, kept for the record.**
+- The first chain run (2026-11-13 23:56Z) gave up on step 0 `mps` after 5 attempts, because `nvidia-cuda-mps-control -d` exited 1 each time.
+  Bisected on this machine, the daemon starts with a pipe directory of up to 87 characters and exits 1 at 88, that is once `<pipe dir>/control_privileged` reaches 107 bytes, consistent with the 108-byte `sun_path` of a Unix socket.
+  G2's `runs/G2/...` paths fit; G3's `outputs/capacity/G3/step0/mps/mps/pipe` (96 characters) does not.
+  75884fd moves the pipe directory to `/tmp/mps-*`, removed after the run, and keeps the MPS log in the run dir; a dry run under MPS from a 124-byte socket path then passed.
+  The 5 attempts are in `outputs/capacity/G3/_aborted/`.
+
+**Cost.**
+30 kept runs (2 step 0, 28 sweep) and 5 aborted daemon starts; sweep wall clock 82 min plus about 4 min per step-0 arm, on the local GPU only.
+
+**What it overturns.**
+- Plan P1 now at k = 2 as well as at k = 8 (G2): in neither setting does MPS serve another user.
+- Plan P2, the reasoning that chose k = 2 for G3: once 4 or more users share the GPU, time-slicing alone fills most of one user's idle time.
+- Scope: evenly staggered phases, which favour time-slicing; a 0.5 s period; one RTX 6000 Ada.
+
+---
+
 ## Refuted claims
 
 | Claim | Refuted by | Note |
 |---|---|---|
 | Per-user VRAM is dominated by the user's own copy of the weights (plan prediction 2) | G1 | Holds at k = 2 (59% weights), fails at k = 8 (33%) and k = 16 (29%). |
-| MPS serves at least one more user than time-slicing (plan prediction 1) | G2 | At k = 8 and 1 update/s both serve 2; small k untested. |
+| MPS serves at least one more user than time-slicing (plan prediction 1) | G2, G3 | Both serve 2 at k = 8 and 1 update/s (G2) and 5 at k = 2 and 2 updates/s (G3). |
+| At k = 2, time-slicing tops out near one user's rate, 1 / 0.122 s = 8.2 updates/s (G3 P2) | G3 | Step 0 reached 10.06 updates/s with 4 users back to back. |
