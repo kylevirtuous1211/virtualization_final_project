@@ -7,7 +7,7 @@ The prefix `V` used in `docs/implementation_plan.md` belongs to the earlier stre
 The index of refuted claims is at the foot of this file; new entries go above it.
 
 Lane: G1 and G2 are exploratory numbers (learning lane), approved in plan mode on 2026-11-06 (plan `misty-painting-summit`).
-G3 is exploratory too, approved in plan mode on 2026-11-13 (the same plan file, reused); G4 is the reproduction attempt that gates the StreamSplat entries.
+G3 is exploratory too, approved in plan mode on 2026-11-13 (the same plan file, reused); G4 is the reproduction attempt that gated the StreamSplat entries, and G8 (approved 2026-11-14) replaced its gate.
 They are not report results.
 
 ## G1 - One AnySplat user costs 0.12-0.86 s of GPU per update and 4.6-9.4 GiB, depending on frames per update
@@ -290,6 +290,67 @@ Under the plan, it blocks G5-G7 until a new registration decides otherwise.
 
 ---
 
+## G8 - By the authors' own metric the released StreamSplat reproduces its paper on DAVIS 2017 val: 37.76 dB keyframe PSNR against 37.83, 23.76 dB on the middle frames against 23.66
+
+**Question.**
+By the authors' own metric, does the released StreamSplat come near its paper's Table 1 on DAVIS 2017 val?
+It replaces G4's gate for G5-G7: G4 used a metric unlike the paper's, so G4 stays failed as registered and this entry decides G5-G7 afresh.
+
+**Setup.**
+- Lane: reproduction attempt that gates the exploratory G5-G7; plan `misty-painting-summit`, revision approved in plan mode on 2026-11-14; registration in the runner header, committed before the run (7f7ea74).
+- Code, weights and image as G4.
+- Model: the authors' training `SplatModel` (`model/splat_model.py`) with the inference options (`configs/options_inference.py`, whose heads match the checkpoint), 6 output frames, compile off, batch 1.
+  The `strict=False` load is checked on the CPU first (`keycheck`): no unexpected key, and the missing keys are only in `condition_encoder` and `lpips_loss`, which the checkpoint never holds.
+- Data: DAVIS 2017 trainval 480p, the 30 val sequences (1,999 frames), and `bear` (train, 82 frames) as a control.
+- Windows: every run of 6 consecutive frames i..i+5, sampled and loaded as `datasets/provider_davis.py` does when not shuffled (6 output frames give interval 1); 1,849 val windows and 77 `bear` windows.
+- Depth: `davis_bear.py depth`, as in G4; depth maps equal frames for all 31 sequences, checked before evaluation.
+- Metric: `SplatModel.forward`'s own `metrics['psnr_given']` (the two keyframes of a window) and `metrics['psnr_novel']` (its middle 4), both computed by the authors' `compute_losses` at 256x256 bilinear; the registered number is the mean over windows per split.
+- Known differences from the authors: 480p JPEGs instead of Full-Resolution (both are resized to 288x512); no `Annotations_unsupervised` (masks enter only the losses, not PSNR); compile off; the paper does not say which windows Table 1 uses.
+- Registered: gate val `psnr_given` ≥ 35.0 dB; R1 val `psnr_given` in 36-38 dB; R2 val `psnr_novel` in 22-25 dB (reported, not a gate); R3 `bear` ≥ 33 dB by this protocol, refuted below 31.
+- Run 2026-11-14 06:42-07:03Z at 7f7ea74, clean tree; deterministic inference, so one run.
+- G5-G7 keep the numbers their runners registered on 2026-11-13, so their entries come after this one.
+
+**Command.**
+```
+bash experiments/streamsplat-repro/run_G8_davis-val-authors-metric.sh            # resumable
+bash experiments/streamsplat-repro/run_G8_davis-val-authors-metric.sh keycheck   # the CPU load check
+bash experiments/streamsplat-repro/run_G8_davis-val-authors-metric.sh metrics    # re-derives outputs/streamsplat-repro/G8/metrics.json
+```
+Per-window values are in `outputs/streamsplat-repro/G8/windows.jsonl`, per-sequence mean, min and max in `metrics.json`.
+
+**Result.**
+
+| split | sequences | windows | `psnr_given` (dB) | `psnr_novel` (dB) | paper Table 1 (dB) |
+|---|---|---|---|---|---|
+| val | 30 | 1,849 | **37.76** | **23.76** | 37.83 / 23.66 |
+| `bear` (train) | 1 | 77 | 35.94 | 32.30 | - |
+
+- **The gate passes (37.76 ≥ 35.0), so G5-G7 run with their registrations unchanged.**
+- Across val sequences the per-sequence mean `psnr_given` runs from 33.96 (`cows`) to 42.40 dB (`dogs-jump`), and single windows from 33.78 to 42.82 dB.
+  `psnr_novel` per sequence runs from 17.09 (`drift-straight`) to 34.61 dB (`drift-chicane`).
+- The mean over windows weights long sequences more; the mean of the 30 per-sequence means is 37.98 dB (`psnr_given`) and 23.62 dB (`psnr_novel`), so the weighting moves neither number by more than 0.22 dB.
+
+**Null.**
+The paper's Table 1 numbers are the reference for its own protocol, which this entry imitates; they are not a null for my capacity data.
+
+**Against the registered predictions.**
+- Gate: **passes**.
+- R1, val `psnr_given` in 36-38 dB: **holds** (37.76).
+- R2, val `psnr_novel` in 22-25 dB: **holds** (23.76).
+- R3, `bear` ≥ 33 dB by this protocol: **holds** (35.94).
+  The same sequence gives 27.51 dB in G4, so most of G4's gap to the paper is G4's protocol, not the model.
+  G4 and G8 differ in more than the metric, though (resolution, codec, keyframe spacing 3 against 5, the inference against the training model class, sequence-wide against per-frame depth normalisation), so this does not say which of those carries the 8.4 dB.
+- `bear`'s middle frames (32.30 dB) are far above val's (23.76); `bear` is a training sequence with slow motion, and this entry does not separate those two.
+
+**Cost.**
+One run, 21 min wall clock (depth for 2,081 frames about 6 min, then 1,926 windows about 14.5 min), on the local GPU only; coding and the CPU key check took about 1 hour.
+
+**What it overturns.**
+Nothing measured: G4's failed gate stands as registered, and the claim it made (30 dB by its own metric) is still refuted.
+It removes G4's block on G5-G7, as the revised plan registered.
+
+---
+
 ## Refuted claims
 
 | Claim | Refuted by | Note |
@@ -297,4 +358,4 @@ Under the plan, it blocks G5-G7 until a new registration decides otherwise.
 | Per-user VRAM is dominated by the user's own copy of the weights (plan prediction 2) | G1 | Holds at k = 2 (59% weights), fails at k = 8 (33%) and k = 16 (29%). |
 | MPS serves at least one more user than time-slicing (plan prediction 1) | G2, G3 | Both serve 2 at k = 8 and 1 update/s (G2) and 5 at k = 2 and 2 updates/s (G3). |
 | At k = 2, time-slicing tops out near one user's rate, 1 / 0.122 s = 8.2 updates/s (G3 P2) | G3 | Step 0 reached 10.06 updates/s with 4 users back to back. |
-| The released StreamSplat clears 30 dB keyframe PSNR on DAVIS `bear`, from its mp4 outputs at 512x288 (G4 gate) | G4 | 27.51 dB; the paper's protocol (256x256, tensors, val split) was not run. |
+| The released StreamSplat clears 30 dB keyframe PSNR on DAVIS `bear`, from its mp4 outputs at 512x288 (G4 gate) | G4 | 27.51 dB. By the paper's protocol (256x256, tensors, val split), G8 gives 37.76 dB on val and 35.94 dB on `bear`. |
