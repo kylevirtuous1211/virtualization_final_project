@@ -7,7 +7,7 @@
 
 Run both modes with the AnySplat env's python (ENV_PY below); the sweep itself only needs the stdlib.
 """
-import argparse, hashlib, json, math, os, subprocess, sys, threading, time
+import argparse, hashlib, json, math, os, shutil, subprocess, sys, tempfile, threading, time
 from pathlib import Path
 
 HOME = Path.home()
@@ -172,10 +172,12 @@ def sweep(args):
         sys.exit(f"GPU not free, refusing to measure:\n{busy}")
     run.mkdir(parents=True)
     env = dict(os.environ, HF_HUB_OFFLINE="1")
+    # MPS sockets must fit sun_path: the daemon exits 1 once pipe/control_privileged reaches 107 bytes, which
+    # run dirs under outputs/capacity/ do, so the pipe dir is a short one in /tmp (the log stays with the run)
+    pipe = Path(tempfile.mkdtemp(prefix="mps-", dir="/tmp")) if args.mps else None
     if args.mps:
-        env.update(CUDA_MPS_PIPE_DIRECTORY=str(run / "mps/pipe"), CUDA_MPS_LOG_DIRECTORY=str(run / "mps/log"))
-        for sub in ("mps/pipe", "mps/log"):
-            (run / sub).mkdir(parents=True)
+        env.update(CUDA_MPS_PIPE_DIRECTORY=str(pipe), CUDA_MPS_LOG_DIRECTORY=str(run / "mps/log"))
+        (run / "mps/log").mkdir(parents=True)
         subprocess.run(["nvidia-cuda-mps-control", "-d"], env=env, check=True)
     (run / "meta.json").write_text(json.dumps(provenance(args), indent=1, default=str))
     forwarded = ["--n", args.n, "--k", args.k, "--period", args.period, "--duration", args.duration,
@@ -204,6 +206,7 @@ def sweep(args):
         time.sleep(0.6)
         if args.mps:
             subprocess.run(["nvidia-cuda-mps-control"], input="quit\n", text=True, env=env)
+            shutil.rmtree(pipe, ignore_errors=True)
     summary = summarise(run, args, procs, t_go)
     (run / "summary.json").write_text(json.dumps(summary, indent=1))
     for entry in summary["users"]:
