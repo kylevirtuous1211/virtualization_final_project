@@ -7,7 +7,7 @@ The prefix `V` used in `docs/implementation_plan.md` belongs to the earlier stre
 The index of refuted claims is at the foot of this file; new entries go above it.
 
 Lane: G1 and G2 are exploratory numbers (learning lane), approved in plan mode on 2026-11-06 (plan `misty-painting-summit`).
-G3 is exploratory too, approved in plan mode on 2026-11-13 (the same plan file, reused).
+G3 is exploratory too, approved in plan mode on 2026-11-13 (the same plan file, reused); G4 is the reproduction attempt that gates the StreamSplat entries.
 They are not report results.
 
 ## G1 - One AnySplat user costs 0.12-0.86 s of GPU per update and 4.6-9.4 GiB, depending on frames per update
@@ -234,6 +234,62 @@ Every number below is in `outputs/capacity/G3/metrics.json` (`step0_updates_per_
 
 ---
 
+## G4 - The released StreamSplat reconstructs DAVIS `bear` keyframes at 27.51 dB by my registered metric, below its 30 dB gate, so G5-G7 were not run
+
+**Question.**
+Does the released StreamSplat reproduce on the kind of data it was trained for, before G5-G7 time it?
+The first run of a borrowed method is a reproduction attempt.
+
+**Setup.**
+- Lane: reproduction attempt that gates the exploratory G5-G7; plan `misty-painting-summit`, approved in plan mode on 2026-11-13; registration in the runner header, committed before the run.
+- Method: StreamSplat, ICLR 2026, arXiv 2506.08862.
+  Claims borrowed: feed-forward dynamic 3D Gaussians from an uncalibrated video stream at 0.049 s per frame (Section 4.2); Table 1 reports 37.83 dB keyframe PSNR on DAVIS.
+- Code DSL-Lab/StreamSplat at 5d686e9 in `third_party/StreamSplat` (untracked: the repository has no LICENSE); weight hashes in `third_party/StreamSplat/checkpoints/SHA256SUMS`; image `streamsplat:5d686e9` (`docker/streamsplat/Dockerfile`, id sha256:1d92e87c0ede...).
+- Data: DAVIS 2017 trainval 480p, sequence `bear`, 82 frames.
+  `bear` is in the 2017 train split, and the paper trains on train and evaluates on val, so the model may have seen this sequence.
+- Depth: Depth Anything V2 ViT-L as the authors' `preprocess_depth_davis.py` makes it; 82 depth maps for 82 frames, checked before inference because `splat_inference.py` silently uses zero depth for a missing map.
+- Inference: the authors' `splat_inference.py` with every default (frame gap 3, batch 8, torch.compile on), so 28 keyframes form 27 pairs, compile drops the last partial batch, and 24 pairs give 25 keyframes and 73 rendered frames.
+- Registered metric: mean PSNR of each rendered keyframe (render frame 3j) against input keyframe j, both read from the two mp4 files `splat_inference.py` writes (libx264, imageio quality 8), at 512x288; pass if ≥ 30 dB, otherwise stop and do not run G5-G7.
+- Run 2026-11-14 01:38-01:41Z from the worktree at 88caf08, clean tree.
+
+**Command.**
+```
+bash experiments/streamsplat-repro/run_G4_davis-bear.sh           # resumable
+bash experiments/streamsplat-repro/run_G4_davis-bear.sh metrics   # re-derives outputs/streamsplat-repro/G4/metrics.json
+bash experiments/streamsplat-repro/run_G4_davis-bear.sh checks    # the bug checks below
+```
+
+**Result.**
+- Mean keyframe PSNR **27.51 dB** over 25 keyframes (min 26.59, max 28.18); one sequence, one run.
+- **Below the registered 30 dB gate, so G5-G7 were not run**, as registered.
+- The per-keyframe values move smoothly, from 26.97 dB at keyframe 0 up to 28.18 at keyframe 16 and down to 26.59 at keyframe 24; no keyframe collapses.
+
+**Bug checks, added after the gate failed** (`checks` above, 81a1c5d).
+- Alignment: render offset 0 gives 27.51 dB, against 21.84 at -1 and 21.68 at +1, so keyframe j is render frame 3j as the metric assumes.
+- Input-side codec loss: the input video against the JPEG keyframes, resized as `splat_inference.py` resizes them, is 40.99 dB, so encoding the input costs little.
+  The render side's codec loss is not measured, because the renders are not saved uncompressed.
+- Neither check finds a bug in my metric.
+
+**Where my metric differs from the paper's** (found after the run, by reading the paper and code).
+- The paper evaluates "at a resolution of 256×256" (Section 4.1), and the authors' metric (`compute_losses` in `model/splat_model.py`) bilinearly resizes both 288x512 frames to 256x256 before PSNR; mine is at 512x288.
+- The authors compute PSNR on tensors; mine reads two mp4 files.
+- Table 1's DAVIS numbers are on the val split; `bear` is in train.
+- The registered margin from 37.83 to 30 dB allowed only for video re-encoding and missed the resolution difference.
+  That is a design error in my registration, not a finding about StreamSplat.
+- So the result is that StreamSplat did not reach the gate by my registered metric; whether it reproduces by the authors' protocol is untested and would be a new entry, registered before its number is computed.
+
+**Null.**
+The paper's 37.83 dB belongs to its own protocol and is not a null for this metric; the registered gate was the criterion.
+
+**Cost.**
+One run, about 3 min of GPU (82 depth maps, then inference with compile), on the local GPU only.
+
+**What it overturns.**
+The registered expectation that the released StreamSplat clears 30 dB by this metric.
+Under the plan, it blocks G5-G7 until a new registration decides otherwise.
+
+---
+
 ## Refuted claims
 
 | Claim | Refuted by | Note |
@@ -241,3 +297,4 @@ Every number below is in `outputs/capacity/G3/metrics.json` (`step0_updates_per_
 | Per-user VRAM is dominated by the user's own copy of the weights (plan prediction 2) | G1 | Holds at k = 2 (59% weights), fails at k = 8 (33%) and k = 16 (29%). |
 | MPS serves at least one more user than time-slicing (plan prediction 1) | G2, G3 | Both serve 2 at k = 8 and 1 update/s (G2) and 5 at k = 2 and 2 updates/s (G3). |
 | At k = 2, time-slicing tops out near one user's rate, 1 / 0.122 s = 8.2 updates/s (G3 P2) | G3 | Step 0 reached 10.06 updates/s with 4 users back to back. |
+| The released StreamSplat clears 30 dB keyframe PSNR on DAVIS `bear`, from its mp4 outputs at 512x288 (G4 gate) | G4 | 27.51 dB; the paper's protocol (256x256, tensors, val split) was not run. |
