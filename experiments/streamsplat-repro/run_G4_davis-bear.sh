@@ -16,6 +16,7 @@
 #
 # Usage: bash experiments/streamsplat-repro/run_G4_davis-bear.sh           (resumable)
 #        bash experiments/streamsplat-repro/run_G4_davis-bear.sh metrics   (re-derive metrics.json)
+#        bash experiments/streamsplat-repro/run_G4_davis-bear.sh checks    (alignment and input-codec checks)
 set -u
 cd "$(dirname "$0")/../.."
 OUT=${G4_OUT:-outputs/streamsplat-repro/G4}
@@ -35,6 +36,9 @@ in_image() {
 psnr() { in_image python "$PWD/experiments/streamsplat-repro/davis_bear.py" psnr "$OUT/inference" "$GAP" "$OUT/metrics.json"; }
 
 if [ "${1:-}" = metrics ]; then psnr; exit; fi
+if [ "${1:-}" = checks ]; then  # bug checks on the metric, added after the run missed its gate
+  in_image python "$PWD/experiments/streamsplat-repro/davis_bear.py" checks "$OUT/inference" "$GAP" "$FRAMES"; exit
+fi
 if [ ! -f "$OUT/depth/.done" ]; then
   wait_free
   in_image python "$PWD/experiments/streamsplat-repro/davis_bear.py" depth "$FRAMES" "$OUT/depth" > "$OUT/depth.log" 2>&1 || exit 1
