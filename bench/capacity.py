@@ -290,7 +290,8 @@ def sweep(args):
             return [str(ENV_PY)]
         # one container per user; the same absolute paths inside, so nothing is translated
         mounts = [f"{REPO}:{REPO}:ro", f"{STREAMSPLAT}:{STREAMSPLAT}:ro", f"{TORCH_HUB}:/torch_home:ro",
-                  f"{Path(args.video).resolve()}:{Path(args.video).resolve()}:ro", f"{run}:{run}"]
+                  f"{Path(args.video).resolve()}:{Path(args.video).resolve()}:ro", f"{run}:{run}",
+                  *([f"{pipe}:{pipe}"] if pipe else [])]
         return ["docker", "run", "--rm", "--name", containers[rank], "--gpus", "all", "--network", "none",
                 "--pid=host", "--ipc=host", "--user", f"{os.getuid()}:{os.getgid()}",
                 "-e", "HOME=/tmp", "-e", "TORCH_HOME=/torch_home", "-e", f"USER={os.environ.get('USER', 'user')}",
