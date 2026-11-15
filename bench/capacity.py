@@ -1,11 +1,14 @@
 #!/usr/bin/env python
-"""Capacity probe (LOG.md G1-G7): N users share one GPU, each a separate process with its own model copy.
+"""Capacity probe (LOG.md G1-G9): N users share one GPU, each a separate process with its own model copy,
+or (--batch, streamsplat only) all N users served by one process that batches their pending updates.
 
-  user  : load the model, then every --period s run one update; one JSONL line per update.
-          anysplat: reconstruct the latest --k frames.
-          streamsplat: estimate depth for the next keyframe, then predict Gaussians for the (previous, next) pair.
-  sweep : refuse to run unless the GPU is free, optionally start a user-level MPS daemon, spawn --n users,
-          sample nvidia-smi every 0.5 s, then write summary.json into a fresh --run-dir.
+  user   : load the model, then every --period s run one update; one JSONL line per update.
+           anysplat: reconstruct the latest --k frames.
+           streamsplat: estimate depth for the next keyframe, then predict Gaussians for the (previous, next) pair.
+  server : streamsplat with one model for --n users on the same release schedules as user; each step takes the
+           pending updates (at most one per user), oldest release first, up to --batch, and runs them as one batch.
+  sweep  : refuse to run unless the GPU is free, optionally start a user-level MPS daemon, spawn --n users (or one
+           server), sample nvidia-smi every 0.5 s, then write summary.json into a fresh --run-dir.
 
 The sweep itself only needs the stdlib. anysplat users run on the host with ENV_PY; each streamsplat user is
 its own container from STREAMSPLAT_IMAGE (--pid=host, so nvidia-smi on the host sees the user's own PID).
@@ -92,13 +95,10 @@ def load_streamsplat(compile_model, device="cuda"):
     return model.eval(), opt
 
 
-def setup_streamsplat(args):
-    """Returns (step, weight_bytes). One update = one new keyframe: Depth Anything V2 depth for it, prepared as
-    preprocess_depth_davis.py does (un-normalised RGB at shorter side 518, min-max to uint8), then Gaussians for
-    the (previous, new) keyframe pair as splat_inference.py prepares it. Frames are resized on the CPU at load time,
-    like AnySplat's; service time is upload plus GPU work. Each user walks the clip from its own offset."""
+def load_streamsplat_inputs(args):
+    """StreamSplat, its depth model, and every clip frame resized on the CPU for both."""
     sys.path.insert(0, str(STREAMSPLAT))
-    import imageio.v2 as iio, numpy as np, torch, torch.nn.functional as functional
+    import imageio.v2 as iio, numpy as np, torch
     from PIL import Image
     from model.depth_wrapper import DepthAnythingWrapper
     model, opt = load_streamsplat(args.compile)
@@ -112,6 +112,16 @@ def setup_streamsplat(args):
         shorter = image.resize((int(image.width * scale), int(image.height * scale)), Image.BILINEAR)
         depth_size = (round(shorter.width / 14) * 14, round(shorter.height / 14) * 14)
         depth_inputs.append(torch.from_numpy(np.asarray(shorter.resize(depth_size, Image.BILINEAR)).copy()).permute(2, 0, 1))
+    return model, depth_model, height, width, model_inputs, depth_inputs
+
+
+def setup_streamsplat(args):
+    """Returns (step, weight_bytes). One update = one new keyframe: Depth Anything V2 depth for it, prepared as
+    preprocess_depth_davis.py does (un-normalised RGB at shorter side 518, min-max to uint8), then Gaussians for
+    the (previous, new) keyframe pair as splat_inference.py prepares it. Frames are resized on the CPU at load time,
+    like AnySplat's; service time is upload plus GPU work. Each user walks the clip from its own offset."""
+    import torch, torch.nn.functional as functional
+    model, depth_model, height, width, model_inputs, depth_inputs = load_streamsplat_inputs(args)
     previous, consumed = None, 0
     times = torch.tensor([[0.0, 1.0]], device="cuda")
 
@@ -142,6 +152,106 @@ def setup_streamsplat(args):
         return {"gaussians": output["pred_gs"]["xyz"].shape[1], "service_depth": depth_seconds}
 
     return step, tensor_bytes(model, depth_model)
+
+
+def setup_streamsplat_server(args):
+    """Returns (step, weight_bytes); step(ranks) runs one update for each listed user as one batch and returns
+    (fields, pred_gs). The same update as setup_streamsplat's, with every min-max taken per sample, since a
+    batch-wide one would let users change each other's inputs."""
+    import torch, torch.nn.functional as functional
+    model, depth_model, height, width, model_inputs, depth_inputs = load_streamsplat_inputs(args)
+    previous, consumed = [None] * args.n, [0] * args.n
+    times = torch.tensor([[0.0, 1.0]], device="cuda")
+
+    def keyframes(indices):
+        rgb = torch.stack([model_inputs[index] for index in indices]).cuda().float().div_(255)  # [B, 3, H, W]
+        disparity = depth_model(torch.stack([depth_inputs[index] for index in indices]).cuda().float().div_(255))  # [B, h, w]
+        disparity = functional.interpolate(disparity[:, None], size=(height, width), mode="bilinear", align_corners=True)
+        low, high = disparity.amin(dim=(1, 2, 3), keepdim=True), disparity.amax(dim=(1, 2, 3), keepdim=True)
+        return rgb, ((disparity - low) / (high - low + 1e-8) * 255).floor()  # [B, 3, H, W], [B, 1, H, W] in 0..255
+
+    def clip_index(rank):
+        return (rank * 7 + consumed[rank]) % len(model_inputs)
+
+    def step(ranks):
+        with torch.no_grad():
+            unprimed = [rank for rank in ranks if previous[rank] is None]
+            if unprimed:
+                rgb, disparity = keyframes([clip_index(rank) for rank in unprimed])
+                for slot, rank in enumerate(unprimed):
+                    previous[rank] = (rgb[slot], disparity[slot])
+                    consumed[rank] += 1
+            depth_start = time.time()
+            rgb, disparity = keyframes([clip_index(rank) for rank in ranks])
+            torch.cuda.synchronize()
+            depth_seconds = time.time() - depth_start
+            frames = torch.stack([torch.stack([previous[rank][0], rgb[slot]]) for slot, rank in enumerate(ranks)])  # [B, 2, 3, H, W]
+            depths = torch.stack([torch.stack([previous[rank][1], disparity[slot]]) for slot, rank in enumerate(ranks)])  # [B, 2, 1, H, W]
+            low, high = depths.amin(dim=(1, 2, 3, 4), keepdim=True), depths.amax(dim=(1, 2, 3, 4), keepdim=True)
+            depths = (depths - low) / (high - low + 1e-8)
+            output = model.forward_gaussians(frames, depths, times.expand(len(ranks), 2))  # cond_times is unused upstream
+            torch.cuda.synchronize()
+        for slot, rank in enumerate(ranks):
+            previous[rank] = (rgb[slot], disparity[slot])
+            consumed[rank] += 1
+        return {"gaussians": output["pred_gs"]["xyz"].shape[1], "service_depth": depth_seconds}, output["pred_gs"]
+
+    return step, tensor_bytes(model, depth_model)
+
+
+def serve(args):
+    """One process, --n users: the release schedule, termination and log lines of user, for every user at once."""
+    import torch
+    outs = [open(Path(args.out, f"user{rank}.jsonl"), "w") for rank in range(args.n)]
+
+    def emit(rank, **fields):
+        outs[rank].write(json.dumps({"rank": rank, "pid": os.getpid(), "t": time.time(), **fields}) + "\n")
+        outs[rank].flush()
+
+    try:
+        step, weight_bytes = setup_streamsplat_server(args)
+        for first in range(0, args.n, args.batch):  # every user's first keyframe
+            step(list(range(first, min(first + args.batch, args.n))))
+        for _ in range(args.warmup):  # every batch size the run can form
+            for size in range(1, min(args.batch, args.n) + 1):
+                step(list(range(size)))
+        torch.cuda.reset_peak_memory_stats()
+        for rank in range(args.n):
+            emit(rank, event="ready", weight_bytes=weight_bytes, reserved=torch.cuda.memory_reserved())
+        Path(args.barrier, "ready.0").touch()
+        go = Path(args.barrier, "go")
+        while not go.exists():
+            time.sleep(0.01)
+        origin = [float(go.read_text()) + rank / args.n * args.period for rank in range(args.n)]  # as user's t0
+        done = [0] * args.n
+        active = set(range(args.n))
+
+        def release(rank):
+            return origin[rank] + done[rank] * args.period
+
+        while active:
+            now = time.time()
+            active = {rank for rank in active if not (args.max_updates and done[rank] >= args.max_updates)
+                      and max(release(rank), now) - origin[rank] < args.duration}
+            pending = sorted((rank for rank in active if release(rank) <= now), key=release)[:args.batch]
+            if not pending:
+                if active:
+                    time.sleep(max(0.0, min(release(rank) for rank in active) - time.time()))
+                continue
+            start = time.time()
+            fields, _ = step(pending)
+            end = time.time()
+            for rank in pending:
+                emit(rank, event="update", j=done[rank], release=release(rank), start=start, end=end,
+                     latency=end - release(rank), service=end - start, batch=len(pending),
+                     peak_alloc=torch.cuda.max_memory_allocated(), reserved=torch.cuda.memory_reserved(), **fields)
+                done[rank] += 1
+    except (torch.cuda.OutOfMemoryError, RuntimeError) as error:
+        if "out of memory" not in str(error).lower():
+            raise
+        for rank in range(args.n):
+            emit(rank, event="oom", msg=str(error)[:300])
+        sys.exit(3)
 
 
 def user(args):
@@ -224,7 +334,8 @@ def percentile(values, q):
 def summarise(run, args, procs, t_go):
     expected = args.max_updates or math.ceil(args.duration / args.period)
     users = []
-    for rank, proc in enumerate(procs):
+    for rank in range(args.n):
+        proc = procs[rank % len(procs)]
         log = run / f"user{rank}.jsonl"
         rows = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
         updates = [row for row in rows if row["event"] == "update"]
@@ -241,7 +352,9 @@ def summarise(run, args, procs, t_go):
                       "weight_bytes": ready.get("weight_bytes"),
                       "peak_alloc": max((row["peak_alloc"] for row in updates), default=None),
                       "meets_slo": proc.returncode == 0 and not oom and len(updates) >= expected
-                                   and percentile(latency, .95) <= args.slo})
+                                   and percentile(latency, .95) <= args.slo,
+                      **({"batch_p50": percentile([row["batch"] for row in updates], .5),
+                          "batch_max": max((row["batch"] for row in updates), default=None)} if args.batch else {})})
     samples = [json.loads(line) for line in (run / "smi.jsonl").read_text().splitlines()]
     proc_mib, foreign = {}, set()
     ours = {entry["pid"] for entry in users}
@@ -254,7 +367,8 @@ def summarise(run, args, procs, t_go):
             if mib.isdigit():  # MPS clients can report [N/A]
                 proc_mib[int(pid)] = max(proc_mib.get(int(pid), 0), int(mib))
     util = [int(row["gpu"].split(", ")[0]) for row in samples if t_go and row["t"] >= t_go]
-    return {"n": args.n, "k": args.k, "period": args.period, "mps": args.mps, "slo": args.slo, "expected": expected,
+    return {"n": args.n, "k": args.k, "period": args.period, "mps": args.mps, **({"batch": args.batch} if args.batch else {}),
+            "slo": args.slo, "expected": expected,
             "all_meet_slo": all(entry["meets_slo"] for entry in users), "users": users,
             "proc_vram_mib_max": proc_mib, "foreign_procs": sorted(foreign), "gpu_util_mean": sum(util) / len(util) if util else None,
             "gpu_mem_mib_max": max((int(row["gpu"].split(", ")[1]) for row in samples), default=None)}
@@ -282,8 +396,9 @@ def sweep(args):
     (run / "meta.json").write_text(json.dumps(provenance(args), indent=1, default=str))
     forwarded = ["--model", args.model, "--n", args.n, "--k", args.k, "--period", args.period, "--duration", args.duration,
                  "--max-updates", args.max_updates, "--warmup", args.warmup, "--video", args.video, "--barrier", run,
-                 "--compile" if args.compile else "--no-compile"]
-    containers = [f"capacity-{os.getpid()}-{rank}" for rank in range(args.n)] if args.model == "streamsplat" else []
+                 "--batch", args.batch, "--compile" if args.compile else "--no-compile"]
+    workers = 1 if args.batch else args.n
+    containers = [f"capacity-{os.getpid()}-{rank}" for rank in range(workers)] if args.model == "streamsplat" else []
 
     def launcher(rank):
         if args.model == "anysplat":
@@ -298,9 +413,13 @@ def sweep(args):
                 "-e", "CUDA_MPS_PIPE_DIRECTORY", "-e", "CUDA_MPS_LOG_DIRECTORY",
                 *[part for mount in mounts for part in ("-v", mount)], STREAMSPLAT_IMAGE, "python"]
 
-    procs = [subprocess.Popen([*launcher(rank), __file__, "user", "--rank", str(rank), "--out", str(run / f"user{rank}.jsonl"),
-                               *map(str, forwarded)], env=env, stdout=open(run / f"user{rank}.log", "w"),
-                              stderr=subprocess.STDOUT) for rank in range(args.n)]
+    if args.batch:  # one server for all users; it writes every user{rank}.jsonl and ready.0
+        procs = [subprocess.Popen([*launcher(0), __file__, "server", "--out", str(run), *map(str, forwarded)], env=env,
+                                  stdout=open(run / "server.log", "w"), stderr=subprocess.STDOUT)]
+    else:
+        procs = [subprocess.Popen([*launcher(rank), __file__, "user", "--rank", str(rank), "--out", str(run / f"user{rank}.jsonl"),
+                                   *map(str, forwarded)], env=env, stdout=open(run / f"user{rank}.log", "w"),
+                                  stderr=subprocess.STDOUT) for rank in range(args.n)]
     stop, t_go = threading.Event(), None
     threading.Thread(target=sample, args=(run / "smi.jsonl", stop), daemon=True).start()
     ready_seconds = 1800 if args.model == "streamsplat" else 900  # every streamsplat user compiles its own model
@@ -332,7 +451,7 @@ def sweep(args):
         print(f"user{entry['rank']} rc={entry['rc']} oom={entry['oom']} upd={entry['updates']}/{entry['expected']} "
               f"lat p50/p95={entry['lat_p50']}/{entry['lat_p95']} svc p50/p95={entry['svc_p50']}/{entry['svc_p95']} "
               f"weights={entry['weight_bytes']} peak_alloc={entry['peak_alloc']} slo={entry['meets_slo']}")
-    print(f"n={args.n} k={args.k} mps={args.mps} all_meet_slo={summary['all_meet_slo']} "
+    print(f"n={args.n} k={args.k} mps={args.mps} batch={args.batch} all_meet_slo={summary['all_meet_slo']} "
           f"util={summary['gpu_util_mean']} proc_vram_mib={summary['proc_vram_mib_max']}")
     if summary["foreign_procs"]:
         print(f"CONTAMINATED, other processes used the GPU: {summary['foreign_procs']}")
@@ -345,7 +464,7 @@ def sweep(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["user", "sweep"])
+    parser.add_argument("mode", choices=["user", "server", "sweep"])
     parser.add_argument("--model", choices=["anysplat", "streamsplat"], default="anysplat")
     parser.add_argument("--compile", action=argparse.BooleanOptionalAction, default=True,
                         help="streamsplat only: torch.compile the predictor (its inference default)")
@@ -358,6 +477,8 @@ def main():
     parser.add_argument("--slo", type=float, default=1.0, help="p95 latency bound in seconds")
     parser.add_argument("--video", default=str(VIDEO))
     parser.add_argument("--mps", action="store_true")
+    parser.add_argument("--batch", type=int, default=0,
+                        help="streamsplat only: one server for all --n users, batching up to this many updates; 0 = a process per user")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--run-dir")
     parser.add_argument("--rank", type=int, default=0)
@@ -366,7 +487,9 @@ def main():
     args = parser.parse_args()
     if args.period == 0 and not args.max_updates:
         parser.error("--period 0 needs --max-updates")
-    user(args) if args.mode == "user" else sweep(args)
+    if args.batch and args.model != "streamsplat":
+        parser.error("--batch needs --model streamsplat")
+    {"user": user, "server": serve, "sweep": sweep}[args.mode](args)
 
 
 if __name__ == "__main__":

@@ -57,15 +57,18 @@ measure() {  # measure <run-dir> "<states to redo>" <capacity.py sweep args...>;
   return 1
 }
 
-sweep_arms() {  # sweep_arms "<N grid>" <capacity.py sweep args...>: ts and mps interleaved per N, 2 repeats each;
-  # an arm stops after two consecutive N where neither repeat passes (G2's rule)
+sweep_arms() {  # sweep_arms "<N grid>" <capacity.py sweep args...>: the arms in $ARMS (default "ts mps")
+  # interleaved per N, 2 repeats each; an arm stops after two consecutive N where neither repeat passes (G2's rule)
   local grid=$1 users arm rep run result passed
   shift
-  local -A fails=([ts]=0 [mps]=0)
+  local arms=(${ARMS:-ts mps})
+  local -A fails=()
+  for arm in "${arms[@]}"; do fails[$arm]=0; done
   for users in $grid; do
-    for arm in ts mps; do
+    for arm in "${arms[@]}"; do
       [ "${fails[$arm]}" -ge 2 ] && continue
-      local flag=(); [ "$arm" = mps ] && flag=(--mps)
+      local flag=()
+      case $arm in mps) flag=(--mps) ;; serial) flag=(--batch 1) ;; batched) flag=(--batch 8) ;; esac
       passed=0
       for rep in 1 2; do
         run=$OUT/$arm/n$users/r$rep
@@ -76,7 +79,9 @@ sweep_arms() {  # sweep_arms "<N grid>" <capacity.py sweep args...>: ts and mps 
       done
       if [ "$passed" = 1 ]; then fails[$arm]=0; else fails[$arm]=$((fails[$arm] + 1)); fi
     done
-    [ "${fails[ts]}" -ge 2 ] && [ "${fails[mps]}" -ge 2 ] && break
+    local stopped=1
+    for arm in "${arms[@]}"; do [ "${fails[$arm]}" -ge 2 ] || stopped=0; done
+    [ "$stopped" = 1 ] && break
   done
 }
 
@@ -113,9 +118,14 @@ def point(run):
             "crashed_users": sum(user["rc"] not in (0, 3) for user in users),
             "updates_per_s": updates_per_s(run),
             "user_vram_mib_min_median_max": [vram[0], statistics.median(vram), vram[-1]] if vram else None,
-            "gpu_mem_mib_max": summary["gpu_mem_mib_max"], "gpu_util_mean": summary["gpu_util_mean"]}
+            "gpu_mem_mib_max": summary["gpu_mem_mib_max"], "gpu_util_mean": summary["gpu_util_mean"],
+            **({"batch_p50_mean": mean_of(users, "batch_p50"), "batch_max": max(user["batch_max"] or 0 for user in users)}
+               if summary.get("batch") else {})}
 
 metrics = {"capacity": {}, "points": {}}
+if (out / "step0").is_dir():  # back-to-back runs, one per batch size (G9)
+    metrics["step0_updates_per_s"] = {run.name: updates_per_s(run) for run in sorted((out / "step0").iterdir())
+                                      if (run / "summary.json").exists()}
 for arm in arms:
     points = {}
     for summary_path in (out / arm).glob("n*/r*/summary.json"):
