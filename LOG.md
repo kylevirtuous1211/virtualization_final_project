@@ -522,6 +522,78 @@ Plan prediction 1 (MPS serves at least one more user) is refuted again, now for 
 
 ---
 
+## G9 - Batching StreamSplat updates across users in one server does not raise throughput: batch 8 gives 4.52 updates/s against 4.92 at batch 1, so the registered gate stopped G9 before its sweep
+
+**Question.**
+Does one StreamSplat server that runs the pending updates of several users as one batch serve more users at one keyframe per user per second than the same server run one update at a time?
+Application-level multiplexing, against the GPU-level sharing of G6 and G7.
+
+**Setup.**
+- Lane: exploratory; plan `misty-painting-summit`, approved 2026-11-15 (design drafted by a Fable 5.1 Plan agent); registration in the runner header (ec728bd), committed before any batch > 1 timing.
+- `bench/capacity.py sweep --model streamsplat --batch B` (ffb40ee): one container, one copy of the weights, N users in one process.
+  Each step takes the pending updates (at most one per user), oldest release first, up to B, and runs them as one batch: depth for the B new keyframes in one call, then `forward_gaussians` on B (previous, new) pairs, every depth min-max per sample.
+  Service time is the whole batch's time; every user in it gets the same service and its own latency.
+- Correctness, before any timing (`probes/streamsplat_batch_equivalence.py`, command in its docstring, 2026-11-16): 4 users at different places in the clip, served as one batch and one at a time; the second update's Gaussians agree at full FP32 (mean absolute difference xyz 1.2e-6, rgb 4.7e-6, against 2.3e-2 and 0.37 for a mismatched user).
+- Step 0, the registered gate: back to back (`--period 0`, 20 steps after warm-up), N = B = b for b in 1 2 4 8, one run each, compile off; throughput = updates / (last end - first start).
+- Run 2026-11-16 20:03-20:08Z at 7de58bf, clean tree, load average 0.52 at the start; `foreign_procs` empty in all 4 runs; no OOM, no crash; every step was a full batch (batch p50 = max = b).
+- Deviations from the plan file, all fixed in the runner header or the probe before the timed runs:
+  - The probe's criterion changed twice, both with the user's approval on 2026-11-15/16: from max absolute difference ≤ 1e-2 to a mean 100x below a mismatched user's with < 1% of values off by > 1e-3 (a few TF32 outliers beat the first), then to full FP32 (under TF32 3.1% of rgb values sit > 1e-3 apart from rounding alone).
+  - The runner checks OOM at b = 8 before the 1.2x test, the reverse of the plan's order; nothing ran out of memory, so the order did not matter.
+  - Warm-up is each user's first keyframe pair, then 3 rounds of every batch size the run can form, so no batch size is first seen while timed.
+- Two earlier b = 1 runs were set aside, both reported here:
+  - 16:30Z: `foreign_procs` caught another project's process on the GPU (digital_health_blood M21), and the harness redid the run, as it does for every such run.
+  - 16:47Z: 4.32 updates/s (service p50 0.228 s, GPU utilisation 42%) with `foreign_procs` empty; that project's next stage had started 12 s earlier at 100% of a CPU core.
+    I set this run aside **after seeing its number**, on that overlap.
+    Kept, it would have failed gate (1) (4.32 is 14% below 5.02); the runner then exits 3 for a harness bug, and the quiet rerun below is the check that would have followed.
+    That CPU contention caused the slowdown is not tested.
+  - The run above started only after that project's chain had exited and the GPU had been empty for 10 min.
+
+**Command.**
+```
+bash experiments/capacity/run_G9_streamsplat-batched.sh           # resumable; stops at the step-0 gate (exit 2)
+bash experiments/capacity/run_G9_streamsplat-batched.sh metrics   # re-derives outputs/capacity/G9/metrics.json
+```
+
+**Result** (step 0, one run per batch size).
+
+| b (users = batch) | updates/s | x b = 1 | service per batch p50 (s) | depth per batch p50 (s) | Gaussian part per batch (s) | GPU utilisation mean (%) | GPU memory max (MiB) |
+|---|---|---|---|---|---|---|---|
+| 1 | 4.92 | 1.00 | 0.202 | 0.049 | 0.153 | 72 | 3,890 |
+| 2 | 4.83 | 0.98 | 0.411 | 0.093 | 0.318 | 78 | 5,090 |
+| 4 | 4.70 | 0.96 | 0.846 | 0.192 | 0.654 | 93 | 7,162 |
+| 8 | 4.52 | 0.92 | 1.767 | 0.394 | 1.373 | 96 | 11,220 |
+
+- Gate (1) passes: b = 1 gives 4.92 updates/s, 2.0% below G5's 5.02, so the server adds no overhead that matters.
+- Gate (2) passes: no OOM at b = 8.
+- **Gate (3) fails: b = 8 gives 0.92x the b = 1 throughput, against the 1.2x required.** As registered, G9 stopped here; the serial-vs-batched sweep was not run, and the capacities of 0 in `metrics.json` are empty fields, not results.
+- A batch of b takes b times as long as one update, or longer: depth 8.0x and the Gaussian part 9.0x at b = 8, so throughput falls slightly as b grows.
+- GPU utilisation rises from 72% to 96% while throughput falls; the 28% of sample time with no kernel running at b = 1 was not spare capacity that batching could use.
+- Bug check, a one-off probe: `forward_gaussians` alone, random inputs already on the GPU, compile off, takes p50 0.155, 0.324, 0.676 and 1.403 s at batch 1, 2, 4 and 8 (n = 20 each; `probes/streamsplat_forward_timing.py 1 2 4 8`, command in its docstring, 2026-11-16 20:09Z).
+  That is 9.1x at batch 8, matching the server's Gaussian part (1.373 s), so the scaling is the model's own on this GPU, not the server's.
+  Why the per-sample cost rises with batch is not tested.
+- Memory grows by about 1,000-1,200 MiB per sample in the batch (3,890 MiB at b = 1, 11,220 MiB at b = 8).
+
+**Null.**
+b = 1 in the same server is the matched control for every b > 1 (only the batch size differs); G5's 5.02 updates/s is the reference that gate (1) checks the server against.
+
+**Against the predictions registered in the runner header.**
+- P1, b = 8 at 2.5x b = 1 (10-17 updates/s), rising with b; refuted if < 2.0x: **refuted** (0.92x, 4.52 updates/s, falling with b).
+  Its reasoning, that G5's 64-73% utilisation at batch 1 left compute idle, does not hold: utilisation reached 96% and throughput did not rise.
+- P2-P7: **not tested**; the gate stopped G9 before the sweep.
+- P8, server memory 6,000-10,000 MiB at every N of the sweep: **not tested** as registered (no sweep).
+  Its assumed 520 MiB of activations per sample is about half of what step 0 shows, and b = 8 alone reaches 11,220 MiB, above that range.
+
+**Cost.**
+4 runs, 5 min wall clock for step 0, plus the 2 set-aside b = 1 runs (16:29-16:47Z, about 18 min including waits), a 2 min dry run (2026-11-15), the correctness probe (about 2 min per attempt, 3 attempts) and the 2 min timing probe; local GPU only.
+Waiting for other projects to leave the GPU took longer than the measurements (2026-11-15 13:01-13:29Z, 2026-11-16 10:42-16:29Z and 17:01-20:02Z).
+
+**What it overturns.**
+The plan's premise that cross-user batching could raise StreamSplat throughput on this GPU: at 288x512 on the RTX 6000 Ada the model gains nothing from batches of 2-8.
+With G6 and G7, neither GPU-level sharing (time-slicing, MPS) nor application-level batching raises how many StreamSplat users this GPU serves; all are bounded near 5 updates/s.
+That one server holding one copy of the weights for N users would save memory is not tested here; memory was not the limit in G6.
+
+---
+
 ## Refuted claims
 
 | Claim | Refuted by | Note |
@@ -533,3 +605,4 @@ Plan prediction 1 (MPS serves at least one more user) is refuted again, now for 
 | One StreamSplat update (depth plus a keyframe pair) costs about 0.09 s on the RTX 6000 Ada (G5) | G5 | 0.190 s with compile, 0.198 s without; `forward_gaussians` alone is 0.152 s. |
 | With StreamSplat at 1 update/s, the capacity limit moves from compute to memory, about 9-11 users (G6) | G6 | 4 users under both arms; compute-bound at about 4.7 updates/s, memory would allow about 12. |
 | At 3 updates/s, a StreamSplat user leaves the GPU mostly idle, so MPS serves more users (G7) | G7 | 1 user under both arms; one user takes 55% of the GPU. |
+| Batching the updates of 8 StreamSplat users into one call raises throughput about 2.5x, because batch 1 leaves the GPU 27-36% idle (G9 P1) | G9 | 0.92x (4.52 against 4.92 updates/s); a batch of 8 takes 8.7x as long, `forward_gaussians` alone 9.1x. |
