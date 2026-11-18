@@ -154,21 +154,30 @@ def setup_streamsplat(args):
     return step, tensor_bytes(model, depth_model)
 
 
+def streamsplat_keyframes(inputs, indices):
+    """inputs as load_streamsplat_inputs returns them; RGB in [0, 1] and Depth Anything disparity min-maxed to
+    0..255 per frame, for the listed clip frames, as one batch: [B, 3, H, W], [B, 1, H, W]."""
+    import torch, torch.nn.functional as functional
+    _, depth_model, height, width, model_inputs, depth_inputs = inputs
+    rgb = torch.stack([model_inputs[index] for index in indices]).cuda().float().div_(255)
+    disparity = depth_model(torch.stack([depth_inputs[index] for index in indices]).cuda().float().div_(255))  # [B, h, w]
+    disparity = functional.interpolate(disparity[:, None], size=(height, width), mode="bilinear", align_corners=True)
+    low, high = disparity.amin(dim=(1, 2, 3), keepdim=True), disparity.amax(dim=(1, 2, 3), keepdim=True)
+    return rgb, ((disparity - low) / (high - low + 1e-8) * 255).floor()
+
+
 def setup_streamsplat_server(args):
     """Returns (step, weight_bytes); step(ranks) runs one update for each listed user as one batch and returns
     (fields, pred_gs). The same update as setup_streamsplat's, with every min-max taken per sample, since a
     batch-wide one would let users change each other's inputs."""
-    import torch, torch.nn.functional as functional
-    model, depth_model, height, width, model_inputs, depth_inputs = load_streamsplat_inputs(args)
+    import torch
+    inputs = load_streamsplat_inputs(args)
+    model, depth_model, _, _, model_inputs, _ = inputs
     previous, consumed = [None] * args.n, [0] * args.n
     times = torch.tensor([[0.0, 1.0]], device="cuda")
 
     def keyframes(indices):
-        rgb = torch.stack([model_inputs[index] for index in indices]).cuda().float().div_(255)  # [B, 3, H, W]
-        disparity = depth_model(torch.stack([depth_inputs[index] for index in indices]).cuda().float().div_(255))  # [B, h, w]
-        disparity = functional.interpolate(disparity[:, None], size=(height, width), mode="bilinear", align_corners=True)
-        low, high = disparity.amin(dim=(1, 2, 3), keepdim=True), disparity.amax(dim=(1, 2, 3), keepdim=True)
-        return rgb, ((disparity - low) / (high - low + 1e-8) * 255).floor()  # [B, 3, H, W], [B, 1, H, W] in 0..255
+        return streamsplat_keyframes(inputs, indices)
 
     def clip_index(rank):
         return (rank * 7 + consumed[rank]) % len(model_inputs)
