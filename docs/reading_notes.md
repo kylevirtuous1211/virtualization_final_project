@@ -968,6 +968,57 @@ They are refinements: the OpenReview poster status, the DyCheck rows that were l
 
 Scratch files are in papers/agent_workdir/ss_verify/
 
+## StreamSplat released implementation, read for serving (2026-11-18)
+
+Code reading of the released StreamSplat (github.com/DSL-Lab/StreamSplat at commit 5d686e9, cloned untracked at `third_party/StreamSplat`; no license, so these notes describe the code and cite lines but copy none of it).
+Paths below are relative to that clone.
+It was done to find out where a StreamSplat update spends its GPU time and what a multi-user server could avoid recomputing (plan `misty-painting-summit`, approved 2026-11-18, entries G10 onward).
+FLOP figures are analytical (2 x multiply-accumulates of GEMMs and attention, norms and activations ignored), not measured.
+
+### One update, stage by stage
+
+`SplatPredictor.forward` (`model/model_utils.py:623-673`) takes a (previous, new) keyframe pair at 288x512, RGB plus depth.
+Each frame is reshaped into its own batch row (`:627-629`), so everything up to the decoder sees one frame only.
+
+| Stage | Code | Frames seen | Output per frame (batch 1, fp32) | GFLOP |
+|---|---|---|---|---|
+| Static encoder: 4-channel 8x8 patch conv to 2304 tokens, fixed sinusoidal positions, 10 global-attention layers, width 768, 12 heads, RMSNorm | `forward_encoder` `:583-587`; `transformer_utils.py:422-442` | one | `[1,1,2304,768]`, 6.75 MiB | 490 per frame |
+| Static upsampler: 2 stages of linear plus pixel shuffle to 36,864 tokens x 192, windowed attention (window 2304, `torch.roll` half shifts) | `gs_predictor.upsampling` `:503-509`; `transformer_utils.py:541-576` | one | `[1,1,36864,192]`, 27 MiB | 337 per frame |
+| Static head: rgb, opacity, scale, pixel-aligned xyz; rotations fixed | `gs_predictor.predictor` (`GSPMDecoder`, `:115-369`) | one | 36,864 Gaussians | 0.1 |
+| DINOv2 ViT-B/14-reg condition at 252x448, 576 patch tokens | `forward_condition` `:597-611`; `Dinov2Wrapper("dinov2_vitb14_reg")` `:548` | one | `[1,1,576,768]`, 1.7 MiB | 112 per frame |
+| `encoder_proj` on the static upsampled tokens | `:552`, `:656-657` | one | `[1,1,36864,192]`, 27 MiB | 3 per frame |
+| Dynamic decoder: both frames' tokens concatenated (4608), learned positions and a per-slot embedding, 10 layers of global self-attention plus cross-attention to the other frame's DINO tokens | `self.decoder` `:648-652`; `transformer_utils.py:444-486` | both | | 1,523 per pair |
+| Dynamic upsampler: same architecture as the static one, separate weights | `self.upsampling` `:589-595`, `:654-655` | both (decoder output) | | 674 per pair |
+| Dynamic head: velocity and opacity fade | `gs_dynamic_predictor` (`GSDynamicDecoder`, `:371-448`) | both | | 33 per pair |
+
+A pair costs about 4.11 TFLOP: 941.6 GFLOP of one-frame work per frame and 2,230 GFLOP of joint work.
+Attention is about 1.87 TFLOP of it (45%).
+The output is 36,864 Gaussians per frame, 73,728 per pair, about 22 floats each.
+
+### What a server could reuse
+
+Every one-frame stage depends only on its own frame and depth: the timestamp never enters (`forward_encoder` passes `timestamp=None` at `:585`, and `cond_times` is never read), there are no batch statistics (RMSNorm is per token), and inference is deterministic in eval mode (the truncated-normal sampler returns its means, `model/mixture_model_utils.py:82-85`; drop path and dropout are 0).
+So the previous keyframe's encoder tokens, DINO condition, static Gaussians and `encoder_proj` output (about 36.7 MiB per user) could be kept and reused for the next pair, saving 941.6 GFLOP, about 23% of an update.
+The decoder's input cannot be cached past the raw encoder tokens, because the learned positions and the per-slot embedding depend on whether a frame sits in slot 0 or slot 1.
+`combine` (`:613-621`) pops keys from the per-frame Gaussian dicts and `:661-663` writes into them, so a cached dict must be copied before use.
+
+### Paper versus released code
+
+- The paper's Algorithm 2 (online inference) encodes each incoming frame once, decodes the pair (h_{k-1}, h_k) and keeps h_k for the next step.
+  The released `splat_inference.py` instead builds independent pairs (`:164-180`) and runs them in batches of 8 (`:197-208`, default `--batch_size 8` at `:268`), so every interior frame is encoded twice.
+- Paper Table 8 (one A100): encoder 18.8 ms, decoder 18.4 ms, rasterisation 4.0 ms, pre- and post-processing 7.8 ms, 49 ms per frame.
+  It does not state the batch size, the inference precision, or whether depth estimation is included.
+- Depth normalisation differs between code paths: training normalises each frame (`model/splat_model.py:182-185`), the offline depth preprocessing writes each frame min-maxed to uint8, and `splat_inference.py:29-31` takes one min-max over every keyframe of the clip, which needs the whole clip and so is not online.
+  The harness in `bench/capacity.py` normalises each keyframe to 0..255 and then each pair, which equals per-frame normalisation whenever every frame's raw disparity range is above about 0.25.
+
+### Precision and synchronisation
+
+- Training used bf16 mixed precision (`configs/options.py:15`, `configs/options_decoder.py:16`, `acc_configs/gpu8.yaml:7`), and the paper reports FlashAttention-2 with BF16.
+  Both heads are pinned to fp32 by `@autocast('cuda', enabled=False)` (`model/model_utils.py:276`, `:396`, `:433`).
+- Inference (`splat_inference.py:77`, and `bench/capacity.py`) keeps fp32 weights and only enables TF32 matmuls, so attention, which goes through `F.scaled_dot_product_attention` with no mask (`model/transformer_utils.py:247-249`), cannot use FlashAttention; DINO uses xformers `memory_efficient_attention`.
+- Each forward makes the host wait several times: an `assert v.isnan().sum() == 0` per predicted key in the static head (`model/model_utils.py:237`, 8 per pair), and tensors built on the CPU and copied to the GPU (`:290-299`, `:408`, `:418`, `:441`).
+- DINO receives [0,1] RGB without ImageNet normalisation, and `forward_condition` resizes the depth too and then drops it (`:604`).
+
 ## Visionary: The World Model Carrier Built on WebGPU-Powered Gaussian Splatting Platform
 
 Key `visionary`, relevance 4/5, identity confirmed by verifier: yes.
