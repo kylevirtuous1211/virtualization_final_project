@@ -71,9 +71,11 @@ def setup_anysplat(args):
     return step, tensor_bytes(model)
 
 
-def load_streamsplat(compile_model, device="cuda"):
+def load_streamsplat(compile_model, device="cuda", checkpointing=True):
     """StreamSplat's inference model with its released weights, loaded as splat_inference.py does, plus the check
-    that its strict=False load hides: no unexpected key, and missing keys only in the DINO condition encoder."""
+    that its strict=False load hides: no unexpected key, and missing keys only in the DINO condition encoder.
+    checkpointing=False turns off the training option that runs every encoder and decoder block through
+    torch.utils.checkpoint, which reads the CUDA RNG state even under no_grad and so cannot be in a CUDA graph."""
     import torch
     from safetensors.torch import load_file
     from configs.options_inference import Options
@@ -81,6 +83,7 @@ def load_streamsplat(compile_model, device="cuda"):
     torch.set_float32_matmul_precision("high")
     opt = Options()
     opt.input_frames, opt.output_frames, opt.epoch, opt.compile = 1, 2, 0, compile_model
+    opt.checkpointing = checkpointing
     if (opt.image_height, opt.image_width) != (288, 512):  # raise, not assert: --nosync servers run under python -O
         raise ValueError(f"unexpected model resolution {(opt.image_height, opt.image_width)}")
     model = SplatModel(opt).to(device)
@@ -103,7 +106,7 @@ def load_streamsplat_inputs(args):
     import imageio.v2 as iio, numpy as np, torch
     from PIL import Image
     from model.depth_wrapper import DepthAnythingWrapper
-    model, opt = load_streamsplat(args.compile)
+    model, opt = load_streamsplat(args.compile, checkpointing=getattr(args, "checkpointing", True))
     depth_model = DepthAnythingWrapper(opt.depth_model_name).to("cuda")
     height, width = opt.image_height, opt.image_width
     model_inputs, depth_inputs = [], []
@@ -156,16 +159,31 @@ def setup_streamsplat(args):
     return step, tensor_bytes(model, depth_model)
 
 
-def streamsplat_keyframes(inputs, indices):
-    """inputs as load_streamsplat_inputs returns them; RGB in [0, 1] and Depth Anything disparity min-maxed to
-    0..255 per frame, for the listed clip frames, as one batch: [B, 3, H, W], [B, 1, H, W]."""
-    import torch, torch.nn.functional as functional
-    _, depth_model, height, width, model_inputs, depth_inputs = inputs
+def upload_keyframes(inputs, indices):
+    """inputs as load_streamsplat_inputs returns them; the listed clip frames on the GPU as one batch: RGB in [0, 1]
+    [B, 3, H, W] for the model, and the depth model's uint8 pixels [B, 3, h, w]."""
+    import torch
+    _, _, _, _, model_inputs, depth_inputs = inputs
     rgb = torch.stack([model_inputs[index] for index in indices]).cuda().float().div_(255)
-    disparity = depth_model(torch.stack([depth_inputs[index] for index in indices]).cuda().float().div_(255))  # [B, h, w]
+    return rgb, torch.stack([depth_inputs[index] for index in indices]).cuda()
+
+
+def disparity_of(inputs, pixels):
+    """Depth Anything disparity for upload_keyframes' pixels, at the model's size, min-maxed to 0..255 per frame:
+    [B, 1, H, W]. Waits on nothing, so a CUDA graph can hold it."""
+    import torch.nn.functional as functional
+    _, depth_model, height, width, _, _ = inputs
+    disparity = depth_model(pixels.float().div_(255))  # [B, h, w]
     disparity = functional.interpolate(disparity[:, None], size=(height, width), mode="bilinear", align_corners=True)
     low, high = disparity.amin(dim=(1, 2, 3), keepdim=True), disparity.amax(dim=(1, 2, 3), keepdim=True)
-    return rgb, ((disparity - low) / (high - low + 1e-8) * 255).floor()
+    return ((disparity - low) / (high - low + 1e-8) * 255).floor()
+
+
+def streamsplat_keyframes(inputs, indices):
+    """RGB in [0, 1] and Depth Anything disparity min-maxed to 0..255 per frame, for the listed clip frames, as one
+    batch: [B, 3, H, W], [B, 1, H, W]."""
+    rgb, pixels = upload_keyframes(inputs, indices)
+    return rgb, disparity_of(inputs, pixels)
 
 
 def per_frame_depth(disparity):
@@ -195,10 +213,12 @@ def row_of(features, slot, copy):
 def model_context(args):
     """The context the batching server's StreamSplat model calls run in: bf16 autocast with --bf16 (C2 of G10's
     plan), and with --nosync (C3) CUDA as the default device, so the tensors the model builds with factory functions
-    start on the GPU instead of being copied there with a host wait. The depth model never runs in it."""
+    start on the GPU instead of being copied there with a host wait. The depth model never runs in it. With
+    --graphs (C4) autocast keeps no cast cache, as CUDA graph capture requires."""
     import contextlib, torch
     stack = contextlib.ExitStack()
-    stack.enter_context(torch.autocast("cuda", dtype=torch.bfloat16, enabled=getattr(args, "bf16", False)))
+    stack.enter_context(torch.autocast("cuda", dtype=torch.bfloat16, enabled=getattr(args, "bf16", False),
+                                       cache_enabled=not getattr(args, "graphs", False)))
     if getattr(args, "nosync", False):
         stack.enter_context(torch.device("cuda"))
     return stack
@@ -225,7 +245,21 @@ def setup_streamsplat_server(args):
     def clip_index(rank):
         return (rank * 7 + consumed[rank]) % len(model_inputs)
 
+    def depth(pixels):
+        return disparity_of(inputs, pixels)
+
+    def update(rgb, disparity, previous_features):
+        with model_context(args):
+            features = streamsplat_stages.encode_frames(predictor, rgb, per_frame_depth(disparity))
+            return features, streamsplat_stages.pair_stage(predictor, previous_features, features)
+
+    graphs = getattr(args, "graphs", False)
+    if graphs:  # C4: one graph per batch size for each stage, recorded on first use, one shared memory pool
+        pool = torch.cuda.graph_pool_handle()
+        depth, update = streamsplat_stages.Graphed(depth, pool), streamsplat_stages.Graphed(update, pool)
+
     def cached_step(ranks):
+        """pred_gs is valid until the next step; with --graphs it is the graph's own buffer."""
         with torch.no_grad():
             unprimed = [rank for rank in ranks if previous[rank] is None]
             if unprimed:
@@ -236,15 +270,14 @@ def setup_streamsplat_server(args):
                     previous[rank] = row_of(features, slot, len(unprimed) > 1)
                     consumed[rank] += 1
             depth_start = time.time()
-            rgb, disparity = keyframes([clip_index(rank) for rank in ranks])
+            rgb, pixels = upload_keyframes(inputs, [clip_index(rank) for rank in ranks])
+            disparity = depth(pixels)
             torch.cuda.synchronize()
             depth_seconds = time.time() - depth_start
-            with model_context(args):
-                features = streamsplat_stages.encode_frames(predictor, rgb, per_frame_depth(disparity))
-                pred_gs = streamsplat_stages.pair_stage(predictor, batch_of([previous[rank] for rank in ranks]), features)
+            features, pred_gs = update(rgb, disparity, batch_of([previous[rank] for rank in ranks]))
             torch.cuda.synchronize()
-        for slot, rank in enumerate(ranks):
-            previous[rank] = row_of(features, slot, len(ranks) > 1)
+        for slot, rank in enumerate(ranks):  # a graph's buffers are overwritten by its next replay, so always copy
+            previous[rank] = row_of(features, slot, graphs or len(ranks) > 1)
             consumed[rank] += 1
         return {"gaussians": pred_gs["xyz"].shape[1], "service_depth": depth_seconds}, pred_gs
 
@@ -445,7 +478,7 @@ def summarise(run, args, procs, t_go):
                 proc_mib[int(pid)] = max(proc_mib.get(int(pid), 0), int(mib))
     util = [int(row["gpu"].split(", ")[0]) for row in samples if t_go and row["t"] >= t_go]
     return {"n": args.n, "k": args.k, "period": args.period, "mps": args.mps,
-            **({"batch": args.batch, "cache": args.cache, "bf16": args.bf16, "nosync": args.nosync} if args.batch else {}),
+            **({"batch": args.batch, "cache": args.cache, "bf16": args.bf16, "nosync": args.nosync, "checkpointing": args.checkpointing, "graphs": args.graphs} if args.batch else {}),
             "slo": args.slo, "expected": expected,
             "all_meet_slo": all(entry["meets_slo"] for entry in users), "users": users,
             "proc_vram_mib_max": proc_mib, "foreign_procs": sorted(foreign), "gpu_util_mean": sum(util) / len(util) if util else None,
@@ -476,7 +509,8 @@ def sweep(args):
                  "--max-updates", args.max_updates, "--warmup", args.warmup, "--video", args.video, "--barrier", run,
                  "--batch", args.batch, "--compile" if args.compile else "--no-compile",
                  "--cache" if args.cache else "--no-cache", "--bf16" if args.bf16 else "--no-bf16",
-                 "--nosync" if args.nosync else "--no-nosync"]
+                 "--nosync" if args.nosync else "--no-nosync", "--graphs" if args.graphs else "--no-graphs",
+                 "--checkpointing" if args.checkpointing else "--no-checkpointing"]
     workers = 1 if args.batch else args.n
     containers = [f"capacity-{os.getpid()}-{rank}" for rank in range(workers)] if args.model == "streamsplat" else []
 
@@ -532,7 +566,7 @@ def sweep(args):
         print(f"user{entry['rank']} rc={entry['rc']} oom={entry['oom']} upd={entry['updates']}/{entry['expected']} "
               f"lat p50/p95={entry['lat_p50']}/{entry['lat_p95']} svc p50/p95={entry['svc_p50']}/{entry['svc_p95']} "
               f"weights={entry['weight_bytes']} peak_alloc={entry['peak_alloc']} slo={entry['meets_slo']}")
-    print(f"n={args.n} k={args.k} mps={args.mps} batch={args.batch} cache={args.cache} bf16={args.bf16} nosync={args.nosync} all_meet_slo={summary['all_meet_slo']} "
+    print(f"n={args.n} k={args.k} mps={args.mps} batch={args.batch} cache={args.cache} bf16={args.bf16} nosync={args.nosync} checkpointing={args.checkpointing} graphs={args.graphs} all_meet_slo={summary['all_meet_slo']} "
           f"util={summary['gpu_util_mean']} proc_vram_mib={summary['proc_vram_mib_max']}")
     if summary["foreign_procs"]:
         print(f"CONTAMINATED, other processes used the GPU: {summary['foreign_procs']}")
@@ -566,6 +600,10 @@ def main():
                         help="with --batch: run the StreamSplat model (not depth) under bf16 autocast (G10 plan, C2)")
     parser.add_argument("--nosync", action=argparse.BooleanOptionalAction, default=False,
                         help="with --batch: run the server under python -O and the model with CUDA as default device (C3)")
+    parser.add_argument("--checkpointing", action=argparse.BooleanOptionalAction, default=True,
+                        help="with --batch, --no-checkpointing turns off StreamSplat's training-time block checkpointing")
+    parser.add_argument("--graphs", action=argparse.BooleanOptionalAction, default=False,
+                        help="with --cache --nosync: replay each batch size's depth and model stages as CUDA graphs (C4)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--run-dir")
     parser.add_argument("--rank", type=int, default=0)
@@ -582,6 +620,10 @@ def main():
         parser.error("--bf16 needs --batch")
     if args.nosync and not args.batch:
         parser.error("--nosync needs --batch")
+    if args.graphs and not (args.cache and args.nosync and not args.checkpointing):
+        parser.error("--graphs needs --cache, --nosync and --no-checkpointing")
+    if not args.checkpointing and not args.batch:
+        parser.error("--no-checkpointing needs --batch")
     {"user": user, "server": serve, "sweep": sweep}[args.mode](args)
 
 

@@ -78,6 +78,40 @@ def split_forward(predictor, frames, depths, timer=None):
     return pair_stage(predictor, first, second, timer)
 
 
+class Graphed:
+    """fn(*inputs) recorded as one CUDA graph per set of input shapes on its first call (after 3 warm-up calls on a
+    side stream, as torch.cuda.graph's documentation asks) and replayed after that; inputs and outputs may be nested
+    dicts of tensors, and every graph of every Graphed sharing `pool` draws from one memory pool. Graphs must not
+    replay concurrently. The outputs are the graph's own buffers, overwritten by the next replay: copy what you keep.
+    fn must not wait on the host (C3's --nosync) and must run autocast with cache_enabled=False."""
+
+    def __init__(self, fn, pool):
+        self.fn, self.pool, self.graphs = fn, pool, {}
+
+    def __call__(self, *inputs):
+        from torch.utils._pytree import tree_flatten, tree_map
+        leaves, _ = tree_flatten(inputs)
+        key = tuple(tuple(leaf.shape) for leaf in leaves if isinstance(leaf, torch.Tensor))
+        if key not in self.graphs:
+            static = tree_map(lambda leaf: leaf.clone() if isinstance(leaf, torch.Tensor) else leaf, inputs)
+            side = torch.cuda.Stream()
+            side.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(side):
+                for _ in range(3):
+                    self.fn(*static)
+            torch.cuda.current_stream().wait_stream(side)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, pool=self.pool):
+                outputs = self.fn(*static)
+            self.graphs[key] = (graph, tree_flatten(static)[0], outputs)
+        graph, static_leaves, outputs = self.graphs[key]
+        for target, leaf in zip(static_leaves, leaves):
+            if isinstance(leaf, torch.Tensor):
+                target.copy_(leaf)
+        graph.replay()
+        return outputs
+
+
 class StageTimer:
     """CUDA-event seconds per stage name, summed over the stages of that name since the last seconds() call."""
 
