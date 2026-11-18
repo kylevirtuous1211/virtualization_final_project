@@ -59,8 +59,8 @@ def mean(arm, n, key):
     runs = points[arm][str(n)].values()
     return sum(run[key] for run in runs) / len(runs)
 def optimised(arm, n):  # the server's own record of python -O, from every kept run's ready lines
-    return [json.loads(line)["python_optimize"] for run in sorted((out / arm / f"n{n}").glob("r*"))
-            for line in (run / "user0.jsonl").read_text().splitlines() if '"ready"' in line]
+    return [json.loads(line)["python_optimize"] for log in sorted((out / arm / f"n{n}").glob("r*/user*.jsonl"))
+            for line in log.read_text().splitlines() if '"ready"' in line]
 metrics["syncs"] = {arm: json.loads((out / "syncs" / f"{arm}.json").read_text()) for arm in ("sync", "nosync")}
 metrics["server_python_optimize"] = {arm: {n: optimised(arm, n) for n in (1, 4)} for arm in ("sync", "nosync")}
 (out / "metrics.json").write_text(json.dumps(metrics, indent=1))
