@@ -687,6 +687,73 @@ G9's reading that 1.0-1.2 GB of memory comes with each extra sample is corrected
 
 ---
 
+## G11 - Keeping each user's previous keyframe features (the paper's Algorithm 2) raises StreamSplat throughput 1.27x at batch 1 and 1.21x at batch 4, for about 37 MiB of live memory per user
+
+**Question.**
+Does keeping each user's previous keyframe's one-frame features in the batching server, so an update encodes only the new keyframe, make an update cheaper, and what VRAM does it cost?
+C1 of plan `misty-painting-summit`, built because G10 found that work to be 21.5% of the model's time (rule: >= 12%).
+
+**Setup.**
+- Lane: exploratory; registration in the runner header (00d7dce), written in plan mode before any cache timing.
+- `bench/capacity.py` `--cache` (9443b83): the server keeps, per user, the previous keyframe's `encode_frames` output (`bench/streamsplat_stages.py`: encoder, DINO condition, static upsampler, static head, `encoder_proj`); an update runs depth and `encode_frames` on the B new keyframes only, then `pair_stage` on the cached and new features.
+  The new keyframe's depth is normalised per frame, which equals the server's pair min-max only when every frame's disparity spans 0..255; the probe checks that premise.
+- Equivalence probe first (`probes/streamsplat_cache_equivalence.py`, FP32 "highest"): 4 users, 3 updates, the server with and without `--cache`, G9's criterion on `pred_gs` xyz and rgb.
+- Timing as G9's step 0: one server, N = batch = b users back to back (`--period 0 --max-updates 20 --warmup 3`), compile off, TF32, b in 1 4; arm `cache` adds `--cache`, arm `nocache` is the matched control (same server, only the cache differs); arms interleaved, 2 repeats each (n = 2 per cell).
+- Run 2026-11-18: probe 16:50-16:52Z, the 8 timed runs 22:45-22:54Z, at 00d7dce; the tree was dirty only by an uncommitted edit to `experiments/streamsplat-repro/davis_eval.py`, which the server does not import, and by untracked docs.
+  `foreign_procs` is empty in all 8 runs; nothing was redone.
+
+**Command.**
+```
+bash experiments/capacity/run_G11_streamsplat-cache.sh           # probe, then 8 runs; resumable
+bash experiments/capacity/run_G11_streamsplat-cache.sh metrics   # re-derives outputs/capacity/G11/metrics.json and the ratios
+python3 -c 'import json,glob; [print(f, *(round(u[k],4) for k in ("svc_p50","svc_depth_p50")), u["peak_alloc"]>>20) for f in sorted(glob.glob("outputs/capacity/G11/*/n*/r*/summary.json")) for u in json.load(open(f))["users"][:1]]'   # service, depth, peak MiB per run
+```
+
+**Result.**
+
+- **The cache gives the same Gaussians**: `CACHE_EQUIVALENCE_OK`; all 64 clip frames span exactly 0..255; at every update the mean absolute difference is <= 4.0e-8 in xyz (a mismatched user: 2.0-2.6e-2) and <= 4.2e-8 in rgb (0.37-0.38), and no value differs by more than 1e-3.
+
+| b (users = batch) | arm | updates/s (r1, r2) | x nocache | service per batch p50 (s) | depth per batch p50 (s) | Gaussian part per batch (s) | peak allocated (MiB) | GPU memory max (MiB) |
+|---|---|---|---|---|---|---|---|---|
+| 1 | nocache | 4.65, 4.71 | 1.00 | 0.214 | 0.056 | 0.158 | 2,840 | 3,890 |
+| 1 | cache | 5.94, 5.92 | 1.27 | 0.169 | 0.055 | 0.114 | 2,877 | 3,890 |
+| 4 | nocache | 4.54, 4.49 | 1.00 | 0.883 | 0.223 | 0.661 | 5,021 | 7,162 |
+| 4 | cache | 5.48, 5.42 | 1.21 | 0.734 | 0.226 | 0.508 | 5,164 | 7,174 |
+
+(service, depth and Gaussian part are means of the two repeats' p50; Gaussian part = service minus depth.)
+
+- **At batch 1 the cache cuts the Gaussian part to 0.72x** (0.114 against 0.158 s) and the update by 45 ms; throughput rises from 4.68 to 5.93 updates/s (means, x1.268).
+  G10's stage sum predicted 173 ms per cached update against 213 ms; measured 169 against 214.
+  The saving is 10 ms larger than G10's 34.0 ms one-frame stage; where the rest comes from was not tested.
+- **At batch 4 the gain is smaller**, 1.207x (4.52 to 5.45 updates/s); the Gaussian part falls to 0.77x, 38 ms per update against 44 ms at batch 1.
+  Why was not tested.
+- **Memory**: the registered metric, whole-GPU memory from nvidia-smi, grows by 0 MiB at batch 1 and 12 MiB at batch 4, because the allocator's existing reserve absorbs the cache.
+  Live tensors (`peak_alloc`) grow by 37 MiB at batch 1 and 143 MiB at batch 4, about 36 MiB per user, as estimated.
+- Depth is unchanged by the cache (0.055 against 0.056 s at batch 1), as it should be.
+- GPU utilisation means are 57-77% at batch 1 and 86-92% at batch 4 in both arms; with about 4 s of timed work per run the spread within an arm is larger than between arms, so they say nothing here.
+- **The control drifted**: the same `step` code as G9 gives 4.68 updates/s at batch 1 against G9's 4.92 (2026-11-16), and 4.52 against 4.70 at batch 4; service 0.214 against 0.202 s at batch 1, depth 0.056 against 0.049 and the Gaussian part 0.158 against 0.153.
+  G10's `forward_gaussians` on the same day (0.158 s) agrees with today's control, so the GPU ran this work about 5% slower on 2026-11-18; the cause was not tested.
+  The ratios above are against the interleaved control and do not depend on it; absolute numbers compared across days do.
+
+**Null.**
+The matched control `nocache`: the same server, run interleaved with `cache`, differing only in `--cache`.
+
+**Against the predictions registered in the runner header.**
+- P1 at b = 1 from 4.92 to 5.6-6.2 updates/s, refuted if < 5.3: **holds** (5.93; x1.268 against the matched control, x1.205 against G9's 4.92).
+- P2 batch 4's gain within 5 percentage points of batch 1's, refuted if they differ by > 10: **not refuted, outside the predicted band** (26.8% and 20.7%, 6.1 points apart).
+- P3 `gpu_mem_mib_max` at b = 4 grows <= 250 MiB, refuted if > 500: **holds** (+12 MiB; +143 MiB of live tensors).
+- Decision by the plan's rule: the cache stays in the final configuration; C2 (bf16) runs with `--cache` in both arms.
+
+**Cost.**
+About 2 min of GPU for the probe and 9 min for the runs; 6 h 5 min wall clock (16:49-22:54Z), almost all of it waiting for other projects to leave the GPU.
+
+**What it overturns.**
+Nothing is refuted.
+It replaces G10's stage-sum estimate of a cached update (173 ms) with a server measurement (169 ms).
+It shows that G9's 4.92 updates/s is not a stable reference across days: the same code gives 4.68 two days later, so the plan's final gate, written as an absolute `fast` b = 1 >= 6.0 updates/s (G9's 4.92 x 1.22), is now harder to pass by about 5%; changing that gate needs a new approval.
+
+---
+
 ## Refuted claims
 
 | Claim | Refuted by | Note |
