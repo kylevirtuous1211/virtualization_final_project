@@ -195,7 +195,8 @@ def setup_streamsplat_server(args):
     (fields, pred_gs). The same update as setup_streamsplat's, with every min-max taken per sample, since a
     batch-wide one would let users change each other's inputs. With --cache (C1 of G10's plan, the paper's
     Algorithm 2) each user keeps its previous keyframe's one-frame features, so an update encodes only the new
-    keyframe and then runs the pair stage (bench/streamsplat_stages.py)."""
+    keyframe and then runs the pair stage (bench/streamsplat_stages.py). With --bf16 (C2) the StreamSplat model runs
+    under bf16 autocast; the depth model never does."""
     import torch
     inputs = load_streamsplat_inputs(args)
     model, depth_model, _, _, model_inputs, _ = inputs
@@ -204,6 +205,9 @@ def setup_streamsplat_server(args):
     if getattr(args, "cache", False):
         import streamsplat_stages
         predictor = streamsplat_stages.predictor_of(model)
+
+    def precision():
+        return torch.autocast("cuda", dtype=torch.bfloat16, enabled=getattr(args, "bf16", False))
 
     def keyframes(indices):
         return streamsplat_keyframes(inputs, indices)
@@ -216,7 +220,8 @@ def setup_streamsplat_server(args):
             unprimed = [rank for rank in ranks if previous[rank] is None]
             if unprimed:
                 rgb, disparity = keyframes([clip_index(rank) for rank in unprimed])
-                features = streamsplat_stages.encode_frames(predictor, rgb, per_frame_depth(disparity))
+                with precision():
+                    features = streamsplat_stages.encode_frames(predictor, rgb, per_frame_depth(disparity))
                 for slot, rank in enumerate(unprimed):
                     previous[rank] = row_of(features, slot, len(unprimed) > 1)
                     consumed[rank] += 1
@@ -224,8 +229,9 @@ def setup_streamsplat_server(args):
             rgb, disparity = keyframes([clip_index(rank) for rank in ranks])
             torch.cuda.synchronize()
             depth_seconds = time.time() - depth_start
-            features = streamsplat_stages.encode_frames(predictor, rgb, per_frame_depth(disparity))
-            pred_gs = streamsplat_stages.pair_stage(predictor, batch_of([previous[rank] for rank in ranks]), features)
+            with precision():
+                features = streamsplat_stages.encode_frames(predictor, rgb, per_frame_depth(disparity))
+                pred_gs = streamsplat_stages.pair_stage(predictor, batch_of([previous[rank] for rank in ranks]), features)
             torch.cuda.synchronize()
         for slot, rank in enumerate(ranks):
             previous[rank] = row_of(features, slot, len(ranks) > 1)
@@ -248,7 +254,8 @@ def setup_streamsplat_server(args):
             depths = torch.stack([torch.stack([previous[rank][1], disparity[slot]]) for slot, rank in enumerate(ranks)])  # [B, 2, 1, H, W]
             low, high = depths.amin(dim=(1, 2, 3, 4), keepdim=True), depths.amax(dim=(1, 2, 3, 4), keepdim=True)
             depths = (depths - low) / (high - low + 1e-8)
-            output = model.forward_gaussians(frames, depths, times.expand(len(ranks), 2))  # cond_times is unused upstream
+            with precision():
+                output = model.forward_gaussians(frames, depths, times.expand(len(ranks), 2))  # cond_times is unused upstream
             torch.cuda.synchronize()
         for slot, rank in enumerate(ranks):
             previous[rank] = (rgb[slot], disparity[slot])
@@ -427,7 +434,7 @@ def summarise(run, args, procs, t_go):
                 proc_mib[int(pid)] = max(proc_mib.get(int(pid), 0), int(mib))
     util = [int(row["gpu"].split(", ")[0]) for row in samples if t_go and row["t"] >= t_go]
     return {"n": args.n, "k": args.k, "period": args.period, "mps": args.mps,
-            **({"batch": args.batch, "cache": args.cache} if args.batch else {}),
+            **({"batch": args.batch, "cache": args.cache, "bf16": args.bf16} if args.batch else {}),
             "slo": args.slo, "expected": expected,
             "all_meet_slo": all(entry["meets_slo"] for entry in users), "users": users,
             "proc_vram_mib_max": proc_mib, "foreign_procs": sorted(foreign), "gpu_util_mean": sum(util) / len(util) if util else None,
@@ -457,7 +464,7 @@ def sweep(args):
     forwarded = ["--model", args.model, "--n", args.n, "--k", args.k, "--period", args.period, "--duration", args.duration,
                  "--max-updates", args.max_updates, "--warmup", args.warmup, "--video", args.video, "--barrier", run,
                  "--batch", args.batch, "--compile" if args.compile else "--no-compile",
-                 "--cache" if args.cache else "--no-cache"]
+                 "--cache" if args.cache else "--no-cache", "--bf16" if args.bf16 else "--no-bf16"]
     workers = 1 if args.batch else args.n
     containers = [f"capacity-{os.getpid()}-{rank}" for rank in range(workers)] if args.model == "streamsplat" else []
 
@@ -512,7 +519,7 @@ def sweep(args):
         print(f"user{entry['rank']} rc={entry['rc']} oom={entry['oom']} upd={entry['updates']}/{entry['expected']} "
               f"lat p50/p95={entry['lat_p50']}/{entry['lat_p95']} svc p50/p95={entry['svc_p50']}/{entry['svc_p95']} "
               f"weights={entry['weight_bytes']} peak_alloc={entry['peak_alloc']} slo={entry['meets_slo']}")
-    print(f"n={args.n} k={args.k} mps={args.mps} batch={args.batch} cache={args.cache} all_meet_slo={summary['all_meet_slo']} "
+    print(f"n={args.n} k={args.k} mps={args.mps} batch={args.batch} cache={args.cache} bf16={args.bf16} all_meet_slo={summary['all_meet_slo']} "
           f"util={summary['gpu_util_mean']} proc_vram_mib={summary['proc_vram_mib_max']}")
     if summary["foreign_procs"]:
         print(f"CONTAMINATED, other processes used the GPU: {summary['foreign_procs']}")
@@ -542,6 +549,8 @@ def main():
                         help="streamsplat only: one server for all --n users, batching up to this many updates; 0 = a process per user")
     parser.add_argument("--cache", action=argparse.BooleanOptionalAction, default=False,
                         help="with --batch: keep each user's previous keyframe's one-frame features (G10 plan, C1)")
+    parser.add_argument("--bf16", action=argparse.BooleanOptionalAction, default=False,
+                        help="with --batch: run the StreamSplat model (not depth) under bf16 autocast (G10 plan, C2)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--run-dir")
     parser.add_argument("--rank", type=int, default=0)
@@ -554,6 +563,8 @@ def main():
         parser.error("--batch needs --model streamsplat")
     if args.cache and not args.batch:
         parser.error("--cache needs --batch")
+    if args.bf16 and not args.batch:
+        parser.error("--bf16 needs --batch")
     {"user": user, "server": serve, "sweep": sweep}[args.mode](args)
 
 
