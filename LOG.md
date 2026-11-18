@@ -891,6 +891,64 @@ G10's reading that a batch-1 update leaves the GPU idle partly because of its ho
 
 ---
 
+## G14 - Replaying each update's stages as CUDA graphs speeds StreamSplat up 1.05x at batch 1 (11.54 updates/s) and not at all at batch 4, holding 0.3 GB more VRAM at batch 1 and 4.2 GB at batch 4
+
+**Question.**
+With the cache (G11), bf16 (G12) and no host waits (G13), does replaying each update's depth and model stages as CUDA graphs make it cheaper, and what VRAM does that hold?
+C4 of plan `misty-painting-summit`, built because G10 found the GPU idle 14-22% of a batch-1 forward (rule: busy < 90%) and G13 brought the model's host waits to zero (rule).
+
+**Setup.**
+- Lane: exploratory; registration in the runner header (9a07deb), predictions as approved in the plan.
+- `--graphs` (0f8d295; `bench/streamsplat_stages.py` `Graphed`): per batch size, the depth stage (Depth Anything plus min-max) and the model stage (`encode_frames` plus `pair_stage`) are each recorded as a CUDA graph on first use, after 3 warm-up calls, in one shared memory pool, and replayed after that; frames are uploaded and cached features gathered outside the graphs.
+- Two deviations from the plan, both made before any graph timing and stated in the header:
+  - graphs are recorded for every batch size the server forms, not for a fixed list with padding;
+  - capture failed on StreamSplat's training-time block checkpointing (`torch.utils.checkpoint` reads the CUDA RNG state even under `no_grad`), so both arms run with the new `--no-checkpointing`, a prerequisite like G13's `-O`.
+  Autocast keeps no cast cache under `--graphs`, as capture requires.
+- `probes/streamsplat_graph_equivalence.py` (03ce095), run under `python -O` by the runner before timing: 4 users, 3 updates; `GRAPH_EQUIVALENCE_OK`, with checkpointing off bitwise equal to G13's server and the graphs bitwise equal to the eager control for every output key at every update.
+- Timing as G11-G13: one server, N = batch = b users back to back (`--period 0 --max-updates 20 --warmup 3`), compile off, `--cache --bf16 --nosync --no-checkpointing` in both arms, b in 1 4; arm `graphs` adds `--graphs`, arm `eager` is the matched control; arms interleaved, 2 repeats each (n = 2 per cell).
+- Run 2026-11-18 23:49-23:59Z, started at 9a07deb.
+  A commit that touched only `bench/sweep_lib.sh` (1badee0) landed while the runs were going, so their `meta.json` names 1badee0; the runner had sourced `sweep_lib.sh` at its start, and `bench/capacity.py` and `bench/streamsplat_stages.py` are identical at both commits.
+  The tree was otherwise dirty only by untracked files; `foreign_procs` is empty in all 8 runs, nothing was redone.
+
+**Command.**
+```
+bash experiments/capacity/run_G14_streamsplat-graphs.sh           # the probe, then 8 runs; resumable
+bash experiments/capacity/run_G14_streamsplat-graphs.sh metrics   # re-derives outputs/capacity/G14/metrics.json and prints the ratios
+python3 -c 'import json,glob; [print(f, *(round(u[k],4) for k in ("svc_p50","svc_depth_p50")), u["peak_alloc"]>>20, s["gpu_mem_mib_max"]) for f in sorted(glob.glob("outputs/capacity/G14/*/n*/r*/summary.json")) for s in [json.load(open(f))] for u in s["users"][:1]]'
+```
+
+**Result.**
+
+| b (users = batch) | arm | updates/s (r1, r2) | x eager | service per batch p50 (s) | depth per batch p50 (s) | Gaussian part per batch (s) | GPU memory max (MiB, r1, r2) | peak allocated (MiB) |
+|---|---|---|---|---|---|---|---|---|
+| 1 | eager | 10.96, 10.99 | 1.00 | 0.0885 | 0.0461 | 0.0424 | 3,906, 3,906 | 2,931 |
+| 1 | graphs | 11.52, 11.57 | 1.05 | 0.0851 | 0.0478 | 0.0373 | 4,068, 4,366 | 2,461 |
+| 4 | eager | 11.18, 11.11 | 1.00 | 0.352 | 0.188 | 0.165 | 7,200, 7,200 | 5,113 |
+| 4 | graphs | 11.18, 10.95 | 0.99 | 0.356 | 0.190 | 0.166 | 11,352, 11,352 | 3,202 |
+
+- **Batch 1 gains 5.2%**: both `graphs` runs above both control runs; the Gaussian part falls to 0.88x (37.3 against 42.4 ms), while the measured depth stage, upload included, rises from 46.1 to 47.8 ms (not explained).
+- **Batch 4 gains nothing** (0.99x): at 4 frames per call the kernels are large enough that launching them was not what kept the GPU waiting; this reading is not tested.
+- **Memory**: the graphs' pool holds 162-460 MiB more at batch 1 (whole-GPU maximum) and 4,152 MiB more at batch 4, where the server records graphs for batch sizes 1 to 4 during its warm-up; live tensors outside the pool fall (`peak_alloc` 2,461 against 2,931 MiB and 3,202 against 5,113), since the graphs' intermediates live in the pool.
+- Throughput against G9's serial server (4.92 updates/s at batch 1, 2026-11-16): the components so far, cache, bf16, no host waits, no checkpointing and graphs, reach 11.54, 2.35x; this compares runs on different days (G12 found a few percent of variation within one evening).
+- Checkpointing off alone is not measured here; the `eager` arm against G13's `nosync` arm (the same server with checkpointing on, run 15 minutes earlier) is an unmatched comparison, 10.97 against 10.73 updates/s at batch 1 and 11.14 against 11.20 at batch 4, inside the few percent that repeats of one configuration vary across runs.
+
+**Null.**
+The matched control `eager`: the same server with `--cache --bf16 --nosync --no-checkpointing`, interleaved, differing only in `--graphs`.
+
+**Against the predictions registered in the runner header.**
+- P1 1.08-1.20x the matched control, refuted if < 1.05x: **not refuted at batch 1, just above the bound and below the predicted range** (1.052x); **refuted at batch 4** (0.993x).
+- P2 about 2 GB more VRAM in bf16, only batch 1 recorded if > 8 GB: **refuted as a size** (0.2-0.5 GB at batch 1, 4.2 GB at batch 4 with graphs for four batch sizes, against the plan's three); the 8 GB fallback is not triggered.
+- Decision: the final 1 Hz sweep's `fast` arm runs the batch-1 server (`--batch 1`, the same as `serial`), where the graphs gain 5% for about 0.3 GB, so `--graphs` is in it: `fast` = `--batch 1 --cache --bf16 --nosync --no-checkpointing --graphs`.
+
+**Cost.**
+9 min wall clock (23:49-23:59Z): about 1 min for the probe, 8 min for the 8 runs.
+
+**What it overturns.**
+G10's 14-22% idle share at batch 1 predicted the graphs' gain as 8-20%; they recover 5%, and nothing at batch 4.
+After G13 and G14, neither host waits nor kernel launches explain much of the remaining time: at batch 1 an update is 48 ms of depth and 37 ms of model.
+
+---
+
 ## Refuted claims
 
 | Claim | Refuted by | Note |
@@ -910,3 +968,5 @@ G10's reading that a batch-1 update leaves the GPU idle partly because of its ho
 | bf16 autocast costs StreamSplat at most 0.15 dB of keyframe PSNR on DAVIS val (G12 P3) | G12 | -0.18 dB (37.58 against 37.76); 4.3% of windows drop > 0.5 dB; novel-view PSNR -0.01 dB. |
 | The RTX 6000 Ada ran StreamSplat about 5% slower on 2026-11-18 than on 2026-11-16 (G11, its control at 4.68 against G9's 4.92 updates/s) | G12 | The same configuration ran 3.4% faster 30 minutes after G11, with depth back at G9's 0.049 s; the speed varies within a day, cause untested. |
 | Removing the host waits from the model calls raises back-to-back StreamSplat throughput 1-5% (G13 P2) | G13 | -2.4% at batch 1 (both runs below both control runs), +1.5% at batch 4 (within the control's spread); the 8 waits per cached update did go to 0. |
+| Replaying the cached bf16 update as CUDA graphs raises back-to-back StreamSplat throughput 1.08-1.20x, about G10's idle share (G14 P1) | G14 | 1.052x at batch 1 (not refuted, below the range), 0.993x at batch 4 (refuted). |
+| The CUDA graphs hold about 2 GB more VRAM in bf16 (G14 P2) | G14 | 0.2-0.5 GB at batch 1; 4.2 GB at batch 4, with graphs for batch sizes 1 to 4. |
