@@ -594,6 +594,99 @@ That one server holding one copy of the weights for N users would save memory is
 
 ---
 
+## G10 - A StreamSplat update spends 21% of its model time re-encoding the previous keyframe, and bf16 runs the model 2.4x faster; stage batching and a second CUDA stream gain nothing
+
+**Question.**
+Where does one StreamSplat update spend its GPU time on the RTX 6000 Ada, and which of the planned components is worth building: C1 a per-user cache of the previous keyframe's one-frame work (the paper's Algorithm 2), C2 bf16 autocast, C3 no host syncs, C4 CUDA graphs, C5 stage-level batching across users, C6 two CUDA streams with priority?
+Step 0 of the plan that follows G9's negative result.
+
+**Setup.**
+- Lane: exploratory; plan `misty-painting-summit`, approved 2026-11-18 (drafted by two Fable 5.1 Plan agents, one for model efficiency and one for a parallel staged server); registration in the runner header (0bdbd3c).
+- The code reading behind the stages is in `docs/reading_notes.md`, "StreamSplat released implementation" (15ebbfd).
+- `bench/streamsplat_stages.py` splits `SplatPredictor.forward` into a one-frame stage (static encoder, DINO condition, static upsampler, static head, `encoder_proj`) and a pair stage (decoder, dynamic upsampler, dynamic head) by calling the predictor's submodules in forward's order; `split_forward` recombines them with forward's tensor shapes.
+- `bench/streamsplat_profile.py`, one container, compile off, pairs from the clip as the batching server builds them (user b: frames 7b and 7b + 1):
+  - stages: `forward_gaussians` end to end; `split_forward` per stage (CUDA events); the one-frame stage on the B new frames alone (what a cache would still compute); the pair stage alone; the depth stage (Depth Anything V2 plus min-max, never under autocast); activation peaks; TF32 and bf16 autocast at batch 1, 2, 4, 8; FP32 "highest" at batch 1.
+  - profile: `torch.profiler` over one forward; busy share = kernel time over the unprofiled wall time.
+  - ceiling: matmul and `scaled_dot_product_attention` with each backend forced.
+  - overlap: the depth stage and the pair stage at batch 1 from two threads on two streams, work sized so both take about 1.7 s alone, with and without high priority for the depth stream.
+  - 3 warm-ups, then 20 timed calls per point (50 for matmuls), each synchronised.
+- Run 2026-11-18 16:40-16:47Z at 0bdbd3c, clean tree; the GPU sampler saw only the profiler's own process in all 722 samples; one attempt, nothing redone.
+- A smoke run (2 calls per point, `outputs/scratch/G10-smoke`) checked the code after the plan's approval and before the runner was committed; its numbers are not used.
+
+**Command.**
+```
+bash experiments/capacity/run_G10_streamsplat-stage-profile.sh           # one container, about 7 min
+bash experiments/capacity/run_G10_streamsplat-stage-profile.sh metrics   # re-derives outputs/capacity/G10/run/metrics.json
+```
+
+**Result.**
+
+`forward_gaussians` p50 (s; n = 20, min-max within 3% of p50 at every point):
+
+| precision | b = 1 | b = 2 | b = 4 | b = 8 | b = 8 over b = 1 |
+|---|---|---|---|---|---|
+| TF32 (as served so far) | 0.158 | 0.326 | 0.683 | 1.428 | 9.03 |
+| bf16 autocast | 0.066 | 0.119 | 0.240 | 0.500 | 7.58 |
+| FP32 "highest" | 0.248 | | | | |
+
+Stages of a cached update at batch 1 (ms, p50), and TF32 per-sample time at batch 4 over batch 1:
+
+| stage | TF32 | bf16 | TF32 per sample, b = 4 over b = 1 |
+|---|---|---|---|
+| static encoder | 14.2 | 5.3 | 1.11 |
+| DINO condition | 3.0 | 5.9 | 0.93 |
+| static upsampler | 12.0 | 4.0 | 1.46 |
+| static head | 4.4 | 9.4 | 0.44 |
+| `encoder_proj` | 0.1 | 0.1 | 2.03 |
+| one-frame stage, wall | 34.0 | 25.0 | |
+| decoder | 53.4 | 14.8 | 1.09 |
+| dynamic upsampler (both frames) | 28.5 | 9.4 | 1.25 |
+| dynamic head (both frames) | 1.8 | 1.7 | 1.16 |
+| pair stage, wall | 84.1 | 26.0 | |
+| depth stage (no autocast in either) | 55.1 | 57.0 | 1.06 |
+
+- **The split reproduces forward**: `split_forward` is bitwise identical to `forward_gaussians` at all 8 batch and precision points, and its stage times sum to 0.90-1.01 of forward's p50.
+- **The cacheable work is 21%**: the one-frame stage of the frame a cache would keep takes 34.0 ms of the 158 ms forward at batch 1 (21.5%).
+  Summing the stages, a cached update would cost about 55 + 34 + 84 = 173 ms against 213 ms today in TF32, and 57 + 25 + 26 = 108 ms with bf16 on the model; these are sums of stage timings, not server runs, and C1 and C2 measure them.
+- **bf16 is 2.4x on the model** (0.066 against 0.158 s at batch 1).
+  Attention explains most of it: in FP32 `scaled_dot_product_attention` has no flash kernel and runs the memory-efficient CUTLASS kernel at 13-19 TFLOP/s at the encoder, decoder and upsampler shapes, against 142-173 TFLOP/s for the flash kernel in bf16; attention takes 67% of kernel time at batch 1 in TF32 and 25% in bf16.
+  In bf16 the static head and DINO got slower than in TF32 (9.4 against 4.4 ms, 5.9 against 3.0 ms); both hold host synchronisations, and why they slow down was not tested.
+- **The GPU is busy 86% of a batch-1 forward in TF32 and 78% in bf16** (100% and 97% at batch 8).
+  One forward makes 14 stream synchronisations: 8 device-to-host reads from the static head's `isnan` asserts and 6 pageable host-to-device copies of tensors built on the CPU; plus one device synchronise; 1,315 kernel launches in TF32, 1,599 in bf16.
+- **Matmul ceilings on this card**, 8192^3: FP32 28.8, TF32 65.8, bf16 103.3 TFLOP/s; at the model's own GEMM shapes TF32 reaches 38-64 and bf16 86-101.
+  Against the analytical 4.11 TFLOP per pair, batch 1 achieves 26 TFLOP/s, 39.5% of the TF32 ceiling.
+- **Where the superlinear batch cost sits**: per sample, the two upsamplers cost 1.46x and 1.25x more at batch 4 than at batch 1, the encoder 1.11x, the decoder 1.09x; G9's 9.1x at batch 8 comes mostly from the upsamplers.
+  The mechanism (the upsampler's windowed attention and `torch.roll` copies spilling the 96 MB L2 at larger batch was the hypothesis) was not tested.
+- **Stage batching saves 2.9 ms per update at batch 4** by the C5 rule (only DINO at 2 and the static head at 8 qualify).
+- **Two streams overlap nothing**: running the depth stage and the pair stage together took as long as running them one after the other (gain -0.1% without priority, -0.6% with the depth stream at high priority).
+  Under load the depth stage's latency rose from 0.051 s to 0.062 s (p50) without priority and to 0.140 s with it; n = 32 calls, one run, not explained.
+- **Activation memory** grows 381 MiB per extra sample in TF32 and 331 MiB in bf16 (peak allocated above the inputs, b = 8 against b = 1), peaking in the upsamplers; G9's 1,000-1,200 MiB per sample from nvidia-smi is mostly allocator reserve, not live tensors.
+
+**Null.**
+`forward_gaussians` at the same batch and precision is the reference every stage is checked and timed against; there is no arm to subtract, since this entry changes nothing in serving.
+
+**Against the predictions registered in the runner header.**
+- Gate (bitwise split, stage sum within 10%): **holds**.
+- P1 cacheable share 20-30%: **holds** (21.5%).
+- P2 bf16 at 0.55-0.75x TF32, refuted if > 0.87x: **not refuted, outside the predicted range on the fast side** (0.42x).
+- P3 busy share 75-90% and >= 14 host waits, refuted if busy > 95%: **holds** (86%; 14 stream synchronisations, as predicted, plus one device synchronise).
+- P4 memory-efficient kernel in FP32 and flash in bf16, attention 40-55% of TF32 kernel time, refuted if < 30%: **kernels as predicted; share above the range** (67%).
+- P5 matmul ceilings TF32 70-95 and bf16 140-190 TFLOP/s, batch 1 at 28-38% of the TF32 ceiling, refuted if TF32 > 120: **not refuted; both ceilings below their ranges** (65.8 and 103.3), achieved share just above (39.5%).
+- P6 DINO and both heads <= 0.6x per sample at batch 4, encoder, decoder, upsamplers and depth 0.9-1.15x, stage batching saving 5-15 ms: **refuted** (DINO 0.93x, dynamic head 1.16x, upsamplers 1.46x and 1.25x; only the static head at 0.44x; saving 2.9 ms).
+- P7 two-stream overlap 5-15%: **refuted** (-0.1% and -0.6%).
+- P8 650-750 MiB per extra sample, peaking in an upsampler or a head; bf16 330-400: **refuted for TF32** (381 MiB), holds for bf16 (331) and for the peak stage (the upsamplers).
+- Decisions by the registered rules: C1 cache (21.5% >= 12%), C2 bf16 (0.42x <= 0.87x), C3 no syncs and C4 CUDA graphs (busy 86% < 90%) go ahead; C5 stage batching (2.9 ms < 10 ms) and C6 two streams (-0.6% < 5%) are dropped; the stop-all condition does not hold.
+
+**Cost.**
+One container, 7 min wall clock (16:40-16:47Z), local GPU only; the smoke run took about 5 min.
+
+**What it overturns.**
+G9 left open why per-sample cost rises with batch; G10 locates it mainly in the two upsamplers (mechanism untested).
+The parallel-pipeline half of the plan loses its two scheduling components: on this GPU neither stage batching nor a second stream adds throughput, so what remains of it is the cache.
+G9's reading that 1.0-1.2 GB of memory comes with each extra sample is corrected to 381 MiB of live activations.
+
+---
+
 ## Refuted claims
 
 | Claim | Refuted by | Note |
@@ -606,3 +699,6 @@ That one server holding one copy of the weights for N users would save memory is
 | With StreamSplat at 1 update/s, the capacity limit moves from compute to memory, about 9-11 users (G6) | G6 | 4 users under both arms; compute-bound at about 4.7 updates/s, memory would allow about 12. |
 | At 3 updates/s, a StreamSplat user leaves the GPU mostly idle, so MPS serves more users (G7) | G7 | 1 user under both arms; one user takes 55% of the GPU. |
 | Batching the updates of 8 StreamSplat users into one call raises throughput about 2.5x, because batch 1 leaves the GPU 27-36% idle (G9 P1) | G9 | 0.92x (4.52 against 4.92 updates/s); a batch of 8 takes 8.7x as long, `forward_gaussians` alone 9.1x. |
+| Batching one stage across users helps the small stages: DINO and both heads cost <= 0.6x per sample at batch 4, saving 5-15 ms per update (G10 P6) | G10 | DINO 0.93x, dynamic head 1.16x, upsamplers 1.25-1.46x; only the static head reaches 0.44x; 2.9 ms saved. |
+| Running the depth stage and the pair stage on two CUDA streams overlaps 5-15% of their work (G10 P7) | G10 | -0.1% without priority, -0.6% with a high-priority depth stream. |
+| Each extra StreamSplat sample in a batch adds 650-750 MiB of live activations in TF32 (G10 P8) | G10 | 381 MiB; G9's 1.0-1.2 GB per sample from nvidia-smi is mostly allocator reserve. |
