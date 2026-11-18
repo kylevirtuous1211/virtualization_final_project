@@ -57,7 +57,8 @@ measure() {  # measure <run-dir> "<states to redo>" <capacity.py sweep args...>;
   return 1
 }
 
-sweep_arms() {  # sweep_arms "<N grid>" <capacity.py sweep args...>: the arms in $ARMS (default "ts mps")
+sweep_arms() {  # sweep_arms "<N grid>" <capacity.py sweep args...>: the arms in $ARMS (default "ts mps"); arm fast
+  # is the batch-1 server with the runner's $FAST_FLAGS
   # interleaved per N, 2 repeats each; an arm stops after two consecutive N where neither repeat passes (G2's rule)
   local grid=$1 users arm rep run result passed
   shift
@@ -68,7 +69,8 @@ sweep_arms() {  # sweep_arms "<N grid>" <capacity.py sweep args...>: the arms in
     for arm in "${arms[@]}"; do
       [ "${fails[$arm]}" -ge 2 ] && continue
       local flag=()
-      case $arm in mps) flag=(--mps) ;; serial) flag=(--batch 1) ;; batched) flag=(--batch 8) ;; esac
+      case $arm in mps) flag=(--mps) ;; serial) flag=(--batch 1) ;; batched) flag=(--batch 8) ;;
+        fast) flag=(--batch 1 $FAST_FLAGS) ;; esac
       passed=0
       for rep in 1 2; do
         run=$OUT/$arm/n$users/r$rep
@@ -119,6 +121,7 @@ def point(run):
             "updates_per_s": updates_per_s(run),
             "user_vram_mib_min_median_max": [vram[0], statistics.median(vram), vram[-1]] if vram else None,
             "gpu_mem_mib_max": summary["gpu_mem_mib_max"], "gpu_util_mean": summary["gpu_util_mean"],
+            "vram_per_user_mib": summary["gpu_mem_mib_max"] / summary["n"] if summary["gpu_mem_mib_max"] else None,
             **({"batch_p50_mean": mean_of(users, "batch_p50"), "batch_max": max(user["batch_max"] or 0 for user in users)}
                if summary.get("batch") else {})}
 
