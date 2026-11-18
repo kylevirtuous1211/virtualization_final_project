@@ -828,6 +828,69 @@ After bf16, the depth model, not StreamSplat, is the largest part of an update.
 
 ---
 
+## G13 - Removing the host waits from StreamSplat's model calls (8 per cached update to 0) does not make an update measurably cheaper: 0.98x at batch 1, 1.02x at batch 4
+
+**Question.**
+With the cache (G11) and bf16 (G12), does removing the host waits in the model calls make an update cheaper?
+C3 of plan `misty-painting-summit`, built because G10 found the GPU busy only 86% (TF32) and 78% (bf16) of a batch-1 forward (rule: < 90%); it is also C4's prerequisite, since a CUDA graph cannot be captured across a host wait.
+
+**Setup.**
+- Lane: exploratory; registration in the runner header (c2ddf3f), predictions as approved in the plan.
+- `bench/capacity.py` `--nosync` (2cbd514): the server runs under `python -O`, which drops the static head's `isnan` asserts (each a device-to-host read), and the model calls run in `torch.device("cuda")`, so the tensors the model builds with factory functions start on the GPU instead of being copied there from pageable memory.
+  The plan said to wrap the step; only the model calls are wrapped, since the depth stage builds nothing on the CPU.
+  The server records `python_optimize` in its ready lines, and our two load checks became `raise`, which `-O` keeps.
+- `bench/streamsplat_sync_count.py` (8459ca1) counts the CUDA runtime calls `torch.profiler` records in one cached bf16 update at batch 1 (`encode_frames` on the new keyframe, then `pair_stage`), once per arm, and checks that the default-device context leaves the output bitwise unchanged.
+- Timing as G11 and G12: one server, N = batch = b users back to back (`--period 0 --max-updates 20 --warmup 3`), compile off, `--cache --bf16` in both arms, b in 1 4; arm `nosync` adds `--nosync`, arm `sync` is the matched control; arms interleaved, 2 repeats each (n = 2 per cell).
+- A smoke run of the counter and two dry runs (`outputs/scratch/g13-smoke`, `g13-dry`, `g13-dry-sync`) checked the code before the runner was committed; the smoke run showed the same counts as below.
+- Run 2026-11-18 23:33-23:42Z at c2ddf3f, the tree dirty only by untracked files; `foreign_procs` is empty in all 8 runs, nothing was redone.
+  The runner's report crashed on a glob that also matched the `r*.out` files; fixed (2149f33, report code only) and re-derived with the `metrics` command below.
+
+**Command.**
+```
+bash experiments/capacity/run_G13_streamsplat-nosync.sh           # sync counts, then 8 runs; resumable
+bash experiments/capacity/run_G13_streamsplat-nosync.sh metrics   # re-derives outputs/capacity/G13/metrics.json (with the sync counts and the servers' -O record) and prints the ratios
+```
+
+**Result.**
+
+| | `sync` (control) | `nosync` |
+|---|---|---|
+| `cudaStreamSynchronize` in one cached update | 8 | 0 |
+| `cudaMemcpyAsync` in one cached update | 25 | 17 |
+| `cudaDeviceSynchronize` (one is the counter's own) | 2 | 2 |
+| output bitwise equal to the update without the device context | yes | yes |
+| server ran under `python -O` (ready lines of all kept runs) | no | yes |
+
+| b (users = batch) | arm | updates/s (r1, r2) | x sync | service per batch p50 (s) | depth per batch p50 (s) |
+|---|---|---|---|---|---|
+| 1 | sync | 11.11, 10.89 | 1.00 | 0.089 | 0.044 |
+| 1 | nosync | 10.62, 10.84 | 0.98 | 0.092 | 0.045 |
+| 4 | sync | 11.17, 10.91 | 1.00 | 0.356 | 0.188 |
+| 4 | nosync | 11.19, 11.22 | 1.02 | 0.353 | 0.188 |
+
+- **The waits are gone**: all 8 stream synchronisations of a cached update disappear, and the output is bitwise unchanged.
+- **Throughput does not rise**: -2.4% at batch 1, where both `nosync` runs are below both control runs (whose own spread is 2.0%), and +1.5% at batch 4, within the control's spread (2.4%); n = 2 per cell.
+  So in this server the GPU's idle time is not spent waiting on these 8 reads and copies; where it is spent was not measured here.
+  Why batch 1 got slightly slower was not tested; one candidate is that the `torch.device` context intercepts every torch call in Python, which costs most where the GPU waits on the CPU.
+- Memory is unchanged (peak allocated 2,927-2,929 MiB at batch 1 and 5,109 MiB at batch 4 in both arms).
+- The `sync` arm here is G12's `bf16` arm, the same code and flags; it ran at 11.00 and 11.04 updates/s against G12's 10.83 and 11.00.
+
+**Null.**
+The matched control `sync`: the same server with `--cache --bf16`, interleaved, differing only in `--nosync`.
+
+**Against the predictions registered in the runner header.**
+- P1 the host waits in an update's model calls drop to 0, refuted if > 2 remain: **holds** (8 to 0).
+- P2 back-to-back throughput rises 1-5%: **refuted** (-2.4% at batch 1; +1.5% at batch 4, within the control's own spread).
+- Decision by the plan's rule: C3 stays in the configuration as C4's prerequisite, though it gains nothing by itself; C4's condition (C3 brings the waits to zero) holds, so C4 runs next with `--cache --bf16 --nosync` in both arms.
+
+**Cost.**
+9 min wall clock (23:33-23:42Z): 1 min for the counts, 7 min for the 8 runs.
+
+**What it overturns.**
+G10's reading that a batch-1 update leaves the GPU idle partly because of its host waits: removing all of them in the cached update gains nothing measurable.
+
+---
+
 ## Refuted claims
 
 | Claim | Refuted by | Note |
@@ -846,3 +909,4 @@ After bf16, the depth model, not StreamSplat, is the largest part of an update.
 | With the cache, bf16 autocast brings the Gaussian part of a batch-1 update to 0.55-0.75x TF32 (G12 P1) | G12 | 0.40x, faster than predicted; 0.33x at batch 4. |
 | bf16 autocast costs StreamSplat at most 0.15 dB of keyframe PSNR on DAVIS val (G12 P3) | G12 | -0.18 dB (37.58 against 37.76); 4.3% of windows drop > 0.5 dB; novel-view PSNR -0.01 dB. |
 | The RTX 6000 Ada ran StreamSplat about 5% slower on 2026-11-18 than on 2026-11-16 (G11, its control at 4.68 against G9's 4.92 updates/s) | G12 | The same configuration ran 3.4% faster 30 minutes after G11, with depth back at G9's 0.049 s; the speed varies within a day, cause untested. |
+| Removing the host waits from the model calls raises back-to-back StreamSplat throughput 1-5% (G13 P2) | G13 | -2.4% at batch 1 (both runs below both control runs), +1.5% at batch 4 (within the control's spread); the 8 waits per cached update did go to 0. |
