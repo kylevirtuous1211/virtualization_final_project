@@ -754,6 +754,80 @@ It shows that G9's 4.92 updates/s is not a stable reference across days: the sam
 
 ---
 
+## G12 - With the cache, bf16 autocast on the model runs StreamSplat at 10.8 updates/s at batch 1 (1.77x TF32) and 11.0 at batch 4 (1.95x), for 0.18 dB of keyframe PSNR on DAVIS val
+
+**Question.**
+With each user's previous keyframe cached (G11), what does running the StreamSplat model under bf16 autocast do to an update's time and memory, and what does it cost in quality?
+C2 of plan `misty-painting-summit`, built because G10 found bf16 to run the model at 0.42x TF32 (rule: <= 0.87x).
+
+**Setup.**
+- Lane: exploratory; registration in the runner header (b51a196), with the predictions approved in the plan before G10 ran and kept unchanged; G10's 0.42x and a dry run (`outputs/scratch/g12-dry`, batch 2) were seen before the header was written, and the header says so.
+- `bench/capacity.py` `--bf16` (e664b77) wraps the StreamSplat model calls (`encode_frames` and `pair_stage` with the cache, `forward_gaussians` without) in `torch.autocast("cuda", dtype=torch.bfloat16)`; the depth model never runs under it, and the heads the authors pin to fp32 stay fp32.
+- Quality: `experiments/streamsplat-repro/davis_eval.py eval --bf16` (1d559f2) on the 30 DAVIS 2017 val sequences, all 1,849 six-frame windows, G8's depth maps reused read-only, the authors' `psnr_given` (the two keyframes) and `psnr_novel` (the middle 4); `model/splat_model.py` keeps the renderer and the losses out of autocast.
+  The control is G8's run (the same code, windows and depth without autocast; inference is deterministic, so it was not rerun), compared per window.
+  This evaluates `SplatModel.forward` in bf16, not the cached server path; the cache's equivalence was checked in FP32 only (G11).
+- Timing as G11: one server, N = batch = b users back to back (`--period 0 --max-updates 20 --warmup 3`), compile off, TF32 matmuls, `--cache` in both arms, b in 1 4; arm `bf16` adds `--bf16`, arm `tf32` is the matched control; arms interleaved, 2 repeats each (n = 2 per cell).
+- Run 2026-11-18 at b51a196, the tree dirty only by untracked files: the evaluation 22:59-23:15Z, the timed runs 23:15-23:27Z.
+  A co-tenant (`digital_health_blood`) appeared during the first `tf32` run at b = 1 and at b = 4; both were moved to `_redo` and redone; `foreign_procs` is empty in all 8 kept runs.
+
+**Command.**
+```
+bash experiments/capacity/run_G12_streamsplat-bf16.sh           # the bf16 DAVIS evaluation, then 8 runs; resumable
+bash experiments/capacity/run_G12_streamsplat-bf16.sh metrics   # re-derives outputs/capacity/G12/davis/metrics.json (with the per-window change against G8) and outputs/capacity/G12/metrics.json, and prints the ratios
+python3 -c 'import json,glob; [print(f, *(round(u[k],4) for k in ("svc_p50","svc_depth_p50")), u["peak_alloc"]>>20) for f in sorted(glob.glob("outputs/capacity/G12/*/n*/r*/summary.json")) for u in json.load(open(f))["users"][:1]]'   # service, depth, peak MiB per run
+```
+
+**Result.**
+
+Quality on DAVIS 2017 val (1,849 windows, mean dB):
+
+| metric | G8 (no autocast) | bf16 | change | per-window change, min to max | windows dropping > 0.5 dB |
+|---|---|---|---|---|---|
+| `psnr_given` (keyframes) | 37.757 | 37.581 | -0.176 | -0.741 to +0.198 | 4.3% |
+| `psnr_novel` (middle frames) | 23.761 | 23.750 | -0.011 | -0.520 to +0.446 | 0.1% |
+
+Timing, both arms with the cache:
+
+| b (users = batch) | arm | updates/s (r1, r2) | x tf32 | service per batch p50 (s) | depth per batch p50 (s) | Gaussian part per batch (s) | peak allocated (MiB) | GPU memory max (MiB) |
+|---|---|---|---|---|---|---|---|---|
+| 1 | tf32 | 6.10, 6.15 | 1.00 | 0.162 | 0.049 | 0.113 | 2,877 | 3,890 |
+| 1 | bf16 | 10.73, 10.93 | 1.77 | 0.090 | 0.045 | 0.046 | 2,929 | 3,906 |
+| 4 | tf32 | 5.66, 5.65 | 1.00 | 0.705 | 0.192 | 0.514 | 5,164 | 7,174 |
+| 4 | bf16 | 11.03, 10.98 | 1.95 | 0.358 | 0.189 | 0.169 | 5,109 | 7,190 |
+
+(service, depth and Gaussian part are means of the two repeats' p50; Gaussian part = service minus depth.)
+
+- **bf16 cuts the Gaussian part to 0.40x at batch 1** (46 against 113 ms) and to 0.33x at batch 4; throughput rises 1.77x and 1.95x.
+  G10's stage sum for a cached bf16 update was 108 ms; measured 90 ms.
+- **With bf16, batch 4 no longer costs more per user than batch 1**: 42 ms of Gaussian part per user at batch 4 against 46 ms at batch 1 (0.93x), where TF32 pays 1.13x (128 against 113 ms); throughput at batch 4 is 1.02x batch 1.
+  Why the superlinear batch cost of TF32 (G9, G10) disappears in bf16 was not tested.
+- **Depth is now half of an update**: 45 of 90 ms at batch 1 and 47 of 89 ms per user at batch 4, against 30% and 27% in the `tf32` arm.
+  Depth also measured 9% faster in the `bf16` arm at batch 1 (0.045 against 0.049 s), though it runs identically in both; not explained.
+- **Memory hardly moves**: whole-GPU memory +16 MiB at both batch sizes; live tensors +52 MiB at batch 1 and -55 MiB at batch 4.
+- **Quality**: the keyframe PSNR drops 0.18 dB on average and by more than 0.5 dB in 4.3% of windows (worst -0.74); the novel-view PSNR is unchanged on average (-0.01).
+- **G11's drift reading does not hold as a day-level change**: the `tf32` arm here is G11's `cache` arm, the same code and flags, and 30 minutes later it ran 3.4% faster (6.13 against 5.93 updates/s at batch 1, 5.65 against 5.45 at batch 4), with depth at 0.049 s as in G9 rather than G11's 0.055.
+  This GPU's speed for the same work varies by about 5% within one evening; the cause (co-tenant CPU load, clocks after a co-tenant's GPU work) was not tested, and cross-run absolute numbers carry it.
+
+**Null.**
+Timing: the matched control `tf32`, the same server with the cache, interleaved, differing only in `--bf16`.
+Quality: G8's per-window PSNR from the same code, windows and depth without autocast.
+
+**Against the predictions registered in the runner header.**
+- P1 the Gaussian part at b = 1 at 0.55-0.75x the control: **refuted, faster than predicted** (0.40x).
+- P2 7.0-8.5 updates/s at b = 1, refuted if < 1.15x the control: **not refuted, outside the predicted range on the fast side** (10.83, 1.77x).
+- P3 `psnr_given` and `psnr_novel` each drop by 0-0.15 dB: **refuted for `psnr_given`** (-0.18 dB), **holds for `psnr_novel`** (-0.01 dB).
+- Quality gate, either mean drop > 0.5 dB keeps bf16 out: **passes** (0.18 and 0.01 dB); bf16 stays in the final configuration, so C3 and later run with `--cache --bf16`.
+
+**Cost.**
+28 min wall clock (22:59-23:27Z): 15 min for the DAVIS evaluation, 12 min for 10 timed runs (2 redone after a co-tenant appeared), the rest waiting for the GPU.
+
+**What it overturns.**
+G9's and G10's superlinear per-user cost of batching holds for TF32 only; under bf16 a batch of 4 costs no more per user than a batch of 1 (mechanism untested).
+G11's statement that the GPU ran about 5% slower on 2026-11-18 than on 2026-11-16 is corrected: the same configuration ran 3.4% faster later the same evening, so the variation is within a day, cause untested.
+After bf16, the depth model, not StreamSplat, is the largest part of an update.
+
+---
+
 ## Refuted claims
 
 | Claim | Refuted by | Note |
@@ -769,3 +843,6 @@ It shows that G9's 4.92 updates/s is not a stable reference across days: the sam
 | Batching one stage across users helps the small stages: DINO and both heads cost <= 0.6x per sample at batch 4, saving 5-15 ms per update (G10 P6) | G10 | DINO 0.93x, dynamic head 1.16x, upsamplers 1.25-1.46x; only the static head reaches 0.44x; 2.9 ms saved. |
 | Running the depth stage and the pair stage on two CUDA streams overlaps 5-15% of their work (G10 P7) | G10 | -0.1% without priority, -0.6% with a high-priority depth stream. |
 | Each extra StreamSplat sample in a batch adds 650-750 MiB of live activations in TF32 (G10 P8) | G10 | 381 MiB; G9's 1.0-1.2 GB per sample from nvidia-smi is mostly allocator reserve. |
+| With the cache, bf16 autocast brings the Gaussian part of a batch-1 update to 0.55-0.75x TF32 (G12 P1) | G12 | 0.40x, faster than predicted; 0.33x at batch 4. |
+| bf16 autocast costs StreamSplat at most 0.15 dB of keyframe PSNR on DAVIS val (G12 P3) | G12 | -0.18 dB (37.58 against 37.76); 4.3% of windows drop > 0.5 dB; novel-view PSNR -0.01 dB. |
+| The RTX 6000 Ada ran StreamSplat about 5% slower on 2026-11-18 than on 2026-11-16 (G11, its control at 4.68 against G9's 4.92 updates/s) | G12 | The same configuration ran 3.4% faster 30 minutes after G11, with depth back at G9's 0.049 s; the speed varies within a day, cause untested. |
