@@ -5,12 +5,15 @@
                                                keys only in the DINO condition encoder and the LPIPS / tracker
                                                modules, which the checkpoint never holds).
   depth <frames-root> <depth-root> <seq>...  : davis_bear.py depth for each sequence not yet marked .done.
-  eval <frames-root> <depth-root> <jsonl> <split> <seq>...
+  eval [--bf16] <frames-root> <depth-root> <jsonl> <split> <seq>...
                                              : every 6-frame window i..i+5 of each sequence, sampled and loaded as
                                                datasets/provider_davis.py does unshuffled (output_frames = 6 gives
                                                interval 1), through SplatModel.forward; records the authors' own
                                                metrics['psnr_given'] (the two keyframes) and ['psnr_novel'] (the
                                                middle 4), both 256x256 bilinear as compute_losses makes them.
+                                               --bf16 (G12, C2 of the G10 plan) runs the forward under bf16
+                                               autocast; the renderer and compute_losses stay fp32
+                                               (model/splat_model.py disables autocast around them).
   metrics <jsonl> <json>                     : the mean over windows per split, and per-sequence mean, min, max.
 """
 import json, sys
@@ -52,7 +55,7 @@ def depth(frames_root, depth_root, sequences):
             done.touch()
 
 
-def evaluate(frames_root, depth_root, jsonl, split, sequences):
+def evaluate(frames_root, depth_root, jsonl, split, sequences, bf16=False):
     import torch, torchvision.transforms as tf
     from PIL import Image
     model = load_model("cuda")
@@ -69,7 +72,8 @@ def evaluate(frames_root, depth_root, jsonl, split, sequences):
                 data = {"frames": torch.stack([image(Image.open(path).convert("RGB")) for path in window])[None].cuda(),
                         "depths": torch.stack(depths)[None].cuda(),
                         "timestamps": torch.arange(6, dtype=torch.float32)[None].cuda(), "supv_masks": None}
-                metrics = model(data)["metrics"]
+                with torch.autocast("cuda", dtype=torch.bfloat16, enabled=bf16):
+                    metrics = model(data)["metrics"]
                 out.write(json.dumps({"split": split, "seq": sequence, "start": start,
                                       "psnr_given": metrics["psnr_given"].item(), "psnr_novel": metrics["psnr_novel"].item()}) + "\n")
             print(f"{split} {sequence}: {len(frames) - 5} windows", flush=True)
@@ -104,6 +108,8 @@ if __name__ == "__main__":
     elif mode == "depth":
         depth(arguments[0], arguments[1], arguments[2:])
     elif mode == "eval":
-        evaluate(arguments[0], arguments[1], arguments[2], arguments[3], arguments[4:])
+        bf16 = arguments[0] == "--bf16"
+        arguments = arguments[1:] if bf16 else arguments
+        evaluate(arguments[0], arguments[1], arguments[2], arguments[3], arguments[4:], bf16)
     else:
         summarise(arguments[0], arguments[1])
