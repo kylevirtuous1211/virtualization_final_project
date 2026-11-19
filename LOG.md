@@ -949,6 +949,81 @@ After G13 and G14, neither host waits nor kernel launches explain much of the re
 
 ---
 
+## G15 - At one keyframe per user per second the RTX 6000 Ada serves 10 StreamSplat users with the fast server against 4 with the serial one, at 0.09 s p95 latency and about 1.0 GB more VRAM
+
+**Question.**
+At one keyframe per user per second, how many StreamSplat users does the RTX 6000 Ada serve with the components that passed G11-G14, against the serial server, and at what VRAM per user?
+The last step of plan `misty-painting-summit`.
+
+**Setup.**
+- Lane: exploratory; registration in the runner header (5f7c77c), predictions as approved in the plan before G10-G14 ran and kept unchanged, although G11-G14's numbers were known when the header was written (the header says so).
+- G6's protocol: period 1 s, phases evenly staggered, 60 s per point, 3 warm-ups, compile off; SLO p95 latency <= 1.0 s, 60/60 updates, no OOM; capacity is the largest N where both repeats pass.
+- Two arms on the same server code, both batch 1, interleaved per N, 2 repeats (n = 2 per point):
+  - `serial` = G9's server (`--batch 1`: TF32, no cache, checkpointing on, eager), the matched control;
+  - `fast` = `--batch 1 --cache --bf16 --nosync --no-checkpointing --graphs`, every component that passed G11-G14.
+  The arms differ in five settings at once, so this entry measures their sum; G11-G14 measured each one.
+- Grid N in 1 2 4 5 6 7 8 10 12; an arm stops after two consecutive N where neither repeat passes.
+- Step 0 before the sweep: each arm back to back at N = 1 (`--period 0 --max-updates 20 --warmup 3`); gate `fast` >= 6.0 updates/s.
+- Selection criterion declared before the sweep: the capacity rule above; quality is not what `fast` is selected on (G12: bf16 costs 0.18 dB of keyframe PSNR on DAVIS val).
+- Run 2026-11-19 00:00:48-00:55:08Z at 5f7c77c (every `meta.json`), tree dirty only by untracked files; `foreign_procs` is empty in all 30 runs, nothing was redone or aborted.
+
+**Command.**
+```
+bash experiments/capacity/run_G15_streamsplat-fast-1hz.sh           # step 0, the gate, then the sweep; resumable
+bash experiments/capacity/run_G15_streamsplat-fast-1hz.sh metrics   # re-derives outputs/capacity/G15/metrics.json and prints the checks below
+python3 -c 'import json; m=json.load(open("outputs/capacity/G15/metrics.json")); [print(a, n, r, p["peak_alloc_max"]>>20, round(p["svc_p50_mean"],4), round(p["svc_depth_p50_mean"],4), round(p["gpu_util_mean"] or 0), p["updates_min"]) for a in m["points"] for n in sorted(m["points"][a], key=int) for r, p in sorted(m["points"][a][n].items())]'
+```
+
+**Result.**
+Step 0, back to back at N = 1: `serial` 4.95, `fast` 11.53 updates/s (2.33x); the gate passed.
+
+| N | `serial` pass | `serial` p95 worst user (s, r1, r2) | `fast` pass | `fast` p95 worst user (s, r1, r2) | GPU memory max (MiB), `serial` / `fast` | per user (MiB), `serial` / `fast` |
+|---|---|---|---|---|---|---|
+| 1 | 2/2 | 0.210, 0.209 | 2/2 | 0.090, 0.090 | 3,890 / 4,806 and 4,068 | 3,890 / 4,437 |
+| 2 | 2/2 | 0.207, 0.210 | 2/2 | 0.087, 0.089 | 3,890 / 4,908 | 1,945 / 2,454 |
+| 4 | 2/2 | 0.205, 0.209 | 2/2 | 0.090, 0.089 | 3,892 / 4,914 | 973 / 1,228 |
+| 5 | 0/2 (58/60 updates) | 2.298, 2.778 | 2/2 | 0.089, 0.089 | 3,894 / 4,916 | 779 / 983 |
+| 6 | 0/2 (48/60) | 11.847, 12.013 | 2/2 | 0.092, 0.089 | 3,894 / 4,918 | 649 / 820 |
+| 7 | not run | | 2/2 | 0.090, 0.089 | - / 4,920 | - / 703 |
+| 8 | not run | | 2/2 | 0.090, 0.089 | - / 4,922 | - / 615 |
+| 10 | not run | | 2/2 | 0.096, 0.094 | - / 4,928 | - / 493 |
+| 12 | not run | | 0/2 (55/60) | 4.963, 5.226 | - / 4,932 | - / 411 |
+
+- **Capacity: `serial` 4, `fast` 10** (both repeats and any repeat alike); `serial` stopped after failing at 5 and 6, as registered; `fast` ran the whole grid and failed at 12, so 10 is not at the grid's edge, but 11 was not run: the capacity is 10 or 11.
+- **The capacity follows step 0's throughput**: every N below the arm's back-to-back rate passed and every N above it failed (`serial` 4 of 4.95 passes, 5 fails; `fast` 10 of 11.53 passes, 12 fails); N between 10 and 11.53 was not tested.
+- **Latency**: `fast`'s median service is 0.077-0.088 s at every passing N, against `serial`'s 0.191-0.196 s; its worst user's p95 stays at 0.087-0.096 s up to N = 10.
+  Past the rate both arms queue without bound: p50 latency 0.89-1.34 s for `serial` at N = 5, 2.4 s for `fast` at N = 12.
+- **VRAM**, the registered metric (`gpu_mem_mib_max / N`): `fast` holds about 1.0 GB more for the whole GPU at every shared N (4,914 against 3,892 MiB at N = 4), 1.14-1.26x `serial` per user.
+  At each arm's own capacity, `fast` serves 10 users in 4,928 MiB (493 per user) and `serial` 4 users in 3,892 MiB (973 per user); both use 10% or less of the 49,140 MiB card.
+  Live tensors (`peak_alloc`) grow by 24.6 MiB per user under `fast` (2,462 MiB at N = 1 to 2,732 at N = 12), the cached bf16 features, and by 2.6 MiB per user under `serial`.
+  `fast`'s whole-GPU memory at N = 1 differs between repeats (4,806 against 4,068 MiB) with the same allocator reserve (3,474 MiB), and the reserve steps to 4,314 MiB from N = 2 on; neither was explained.
+- **GPU utilisation** (nvidia-smi means) at the largest N each arm ran: `serial` 93% at N = 6, `fast` 94% at N = 12.
+  Below saturation the means scatter between repeats of one point (`fast` N = 4: 9% and 68%; `serial` N = 2: 56% and 92%), so they say nothing there.
+- Depth stays at 41-51 ms of every update in both arms; in `fast` it is now about half of the service time.
+
+**Null.**
+The matched control `serial`, G9's batch-1 server on the same code and protocol, interleaved per N; its capacity reproduces G6's 4 users (separate containers, time-slicing and MPS, 2026-11-14).
+
+**Against the predictions registered in the runner header.**
+- `serial` capacity 4 (5 possible), refuted if neither: **holds** (4).
+- `fast` capacity 6 (5-8), refuted if <= `serial`: **not refuted; the estimate is missed high** (10).
+- Saturated throughput `serial` 4.7-4.9, `fast` 7-9 updates/s: **missed high** for both (4.95; 11.53).
+- p95 at N = 4 `serial` 0.19-0.21 s, `fast` 0.11-0.16 s, refuted if `fast` is not below 0.9x `serial`: **not refuted** (0.207 and 0.090 s, 0.43x); `fast` is below its range.
+- `fast` GPU utilisation at saturation >= 85%, refuted if < 78%: **holds** (94% at N = 12).
+- VRAM per served user, refuted if `fast` exceeds 2x `serial` at any shared N: **not refuted** (at most 1.26x).
+- None of the plan's stop conditions was triggered.
+
+**Cost.**
+54 min wall clock, 30 runs (2 at step 0, 28 in the sweep: 10 `serial`, 18 `fast`), none redone; the lab's own GPU, no charge.
+
+**What it overturns.**
+No earlier entry is refuted outright; G15 changes how G6 reads.
+G6 found 4 users at 1 Hz with the limit in compute, from the released inference code's 0.19 s per update; that bound belongs to the code, not to the card: with the paper's own feature cache (G11), the precision the model was trained in (G12) and CUDA graphs (G14), the same card serves 10, for 1.0 GB of VRAM and 0.18 dB of keyframe PSNR.
+G2-G9 found that sharing mechanisms (time-slicing, MPS, batching across users) serve no more users; G15 does not change that: the gain comes from doing less work per update, not from sharing the GPU differently.
+The capacity is still compute-bound: at 10 users the card uses about 5 GB, and depth (Depth Anything V2 ViT-L in TF32, untouched by every component) is about half of each update.
+
+---
+
 ## Refuted claims
 
 | Claim | Refuted by | Note |
@@ -970,3 +1045,4 @@ After G13 and G14, neither host waits nor kernel launches explain much of the re
 | Removing the host waits from the model calls raises back-to-back StreamSplat throughput 1-5% (G13 P2) | G13 | -2.4% at batch 1 (both runs below both control runs), +1.5% at batch 4 (within the control's spread); the 8 waits per cached update did go to 0. |
 | Replaying the cached bf16 update as CUDA graphs raises back-to-back StreamSplat throughput 1.08-1.20x, about G10's idle share (G14 P1) | G14 | 1.052x at batch 1 (not refuted, below the range), 0.993x at batch 4 (refuted). |
 | The CUDA graphs hold about 2 GB more VRAM in bf16 (G14 P2) | G14 | 0.2-0.5 GB at batch 1; 4.2 GB at batch 4, with graphs for batch sizes 1 to 4. |
+| The fast StreamSplat server runs 7-9 updates/s back to back and serves 6 (5-8) users at 1 Hz, at 0.11-0.16 s p95 with 4 users (G15 estimates) | G15 | 11.53 updates/s, 10 users (11 not run), 0.090 s; all beyond the estimates in the favourable direction, no registered refutation criterion met. |
