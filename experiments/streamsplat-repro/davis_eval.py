@@ -4,7 +4,9 @@
                                                the CPU and check the strict=False load (no unexpected key; missing
                                                keys only in the DINO condition encoder and the LPIPS / tracker
                                                modules, which the checkpoint never holds).
-  depth <frames-root> <depth-root> <seq>...  : davis_bear.py depth for each sequence not yet marked .done.
+  depth [--bf16] <frames-root> <depth-root> <seq>...
+                                             : davis_bear.py depth for each sequence not yet marked .done;
+                                               --bf16 (G16) runs the depth model under bf16 autocast.
   eval [--bf16] <frames-root> <depth-root> <jsonl> <split> <seq>...
                                              : every 6-frame window i..i+5 of each sequence, sampled and loaded as
                                                datasets/provider_davis.py does unshuffled (output_frames = 6 gives
@@ -15,6 +17,10 @@
                                                autocast; the renderer and compute_losses stay fp32
                                                (model/splat_model.py disables autocast around them).
   metrics <jsonl> <json>                     : the mean over windows per split, and per-sequence mean, min, max.
+  compare-depth <root> <reference-root> <json> <seq>...
+                                             : (G16) every depth map of root against the reference's, in 0..255
+                                               levels: per map the mean and max absolute difference and the
+                                               share of equal pixels, then the mean over maps and the overall max.
 """
 import json, sys
 from pathlib import Path
@@ -46,12 +52,12 @@ def keycheck():
     print("KEYCHECK_OK")
 
 
-def depth(frames_root, depth_root, sequences):
+def depth(frames_root, depth_root, sequences, bf16=False):
     from davis_bear import depth as depth_one
     for sequence in sequences:
         done = Path(depth_root) / sequence / ".done"
         if not done.exists():
-            depth_one(str(Path(frames_root) / sequence), str(Path(depth_root) / sequence))
+            depth_one(str(Path(frames_root) / sequence), str(Path(depth_root) / sequence), bf16)
             done.touch()
 
 
@@ -77,6 +83,23 @@ def evaluate(frames_root, depth_root, jsonl, split, sequences, bf16=False):
                 out.write(json.dumps({"split": split, "seq": sequence, "start": start,
                                       "psnr_given": metrics["psnr_given"].item(), "psnr_novel": metrics["psnr_novel"].item()}) + "\n")
             print(f"{split} {sequence}: {len(frames) - 5} windows", flush=True)
+
+
+def compare_depth(root, reference_root, json_path, sequences):
+    import numpy as np
+    from PIL import Image
+    maps = []
+    for sequence in sequences:
+        for path in sorted(Path(reference_root, sequence).glob("*_pred.png")):
+            ours = np.asarray(Image.open(Path(root, sequence, path.name)), dtype=np.int16)
+            gap = np.abs(ours - np.asarray(Image.open(path), dtype=np.int16))
+            maps.append({"seq": sequence, "map": path.name, "mean_abs_levels": float(gap.mean()),
+                         "max_abs_levels": int(gap.max()), "equal_share": float((gap == 0).mean())})
+    result = {"maps": len(maps), "mean_abs_levels": float(np.mean([entry["mean_abs_levels"] for entry in maps])),
+              "max_abs_levels": max(entry["max_abs_levels"] for entry in maps),
+              "equal_share_mean": float(np.mean([entry["equal_share"] for entry in maps])), "per_map": maps}
+    Path(json_path).write_text(json.dumps(result, indent=1))
+    print(json.dumps({key: value for key, value in result.items() if key != "per_map"}))
 
 
 def summarise(jsonl, metrics_path):
@@ -106,10 +129,14 @@ if __name__ == "__main__":
     if mode == "keycheck":
         keycheck()
     elif mode == "depth":
-        depth(arguments[0], arguments[1], arguments[2:])
+        bf16 = arguments[0] == "--bf16"
+        arguments = arguments[1:] if bf16 else arguments
+        depth(arguments[0], arguments[1], arguments[2:], bf16)
     elif mode == "eval":
         bf16 = arguments[0] == "--bf16"
         arguments = arguments[1:] if bf16 else arguments
         evaluate(arguments[0], arguments[1], arguments[2], arguments[3], arguments[4:], bf16)
+    elif mode == "compare-depth":
+        compare_depth(arguments[0], arguments[1], arguments[2], arguments[3:])
     else:
         summarise(arguments[0], arguments[1])

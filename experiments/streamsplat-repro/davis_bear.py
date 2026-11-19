@@ -2,7 +2,11 @@
 
   depth <frames-dir> <depth-dir> : Depth Anything V2 depth for every frame, made exactly as the authors'
                                    preprocess_depth_davis.py makes it (their Predictor and resize functions,
-                                   min-max to uint8), saved as <stem>_pred.png.
+                                   min-max to uint8), saved as <stem>_pred.png. The Predictor's two steps are
+                                   called one by one so that depth(..., bf16=True) (G16, davis_eval.py depth
+                                   --bf16) can run the depth model alone under bf16 autocast and interpolate in
+                                   fp32, as bench/capacity.py's --depth-bf16 server does; with bf16 off the
+                                   computation is the Predictor's.
   psnr <output-dir> <gap> <json> : PSNR of each rendered keyframe against its input keyframe, read from the two
                                    videos splat_inference.py writes (keyframe i is render frame i * gap).
   checks <output-dir> <gap> <frames-dir> : bug checks on psnr, added after G4 missed its gate: the mean PSNR at
@@ -13,8 +17,8 @@ import json, sys
 from pathlib import Path
 
 
-def depth(frames_dir, depth_dir):
-    import cv2, numpy as np, torch, torchvision.transforms as transforms
+def depth(frames_dir, depth_dir, bf16=False):
+    import cv2, numpy as np, torch, torch.nn.functional as functional, torchvision.transforms as transforms
     from PIL import Image
     from configs.options import Options
     from preprocess_depth_davis import Predictor, resize_to_multiple_of_14, resize_to_shorter_side
@@ -27,7 +31,10 @@ def depth(frames_dir, depth_dir):
             image = Image.open(frame_path).convert("RGB")
             frame = to_tensor(image).unsqueeze(0).cuda()
             depth_input = to_tensor(resize_to_multiple_of_14(resize_to_shorter_side(image))).unsqueeze(0).cuda()
-            predicted = model(frame, depth_input)[0, 0].cpu().numpy()
+            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=bf16):
+                disparity = model.depth_prior(depth_input).float()  # [1, h, w], what Predictor.forward computes first
+            predicted = functional.interpolate(disparity[:, None], size=frame.shape[-2:], mode="bilinear",
+                                               align_corners=True)[0, 0].cpu().numpy()  # then this, at frame size
             normalised = cv2.normalize(predicted, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
             cv2.imwrite(str(Path(depth_dir) / f"{frame_path.stem}_pred.png"), normalised)
     print(f"depth maps: {len(frames)}")
