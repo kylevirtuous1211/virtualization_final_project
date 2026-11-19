@@ -58,7 +58,7 @@ measure() {  # measure <run-dir> "<states to redo>" <capacity.py sweep args...>;
 }
 
 sweep_arms() {  # sweep_arms "<N grid>" <capacity.py sweep args...>: the arms in $ARMS (default "ts mps"); arm fast
-  # is the batch-1 server with the runner's $FAST_FLAGS
+  # is the batch-1 server with the runner's $FAST_FLAGS, arm depthbf16 the same plus --depth-bf16 (G16)
   # interleaved per N, 2 repeats each; an arm stops after two consecutive N where neither repeat passes (G2's rule)
   local grid=$1 users arm rep run result passed
   shift
@@ -69,8 +69,9 @@ sweep_arms() {  # sweep_arms "<N grid>" <capacity.py sweep args...>: the arms in
     for arm in "${arms[@]}"; do
       [ "${fails[$arm]}" -ge 2 ] && continue
       local flag=()
-      case $arm in mps) flag=(--mps) ;; serial) flag=(--batch 1) ;; batched) flag=(--batch 8) ;;
-        fast) flag=(--batch 1 $FAST_FLAGS) ;; esac
+      case $arm in ts) ;; mps) flag=(--mps) ;; serial) flag=(--batch 1) ;; batched) flag=(--batch 8) ;;
+        fast) flag=(--batch 1 $FAST_FLAGS) ;; depthbf16) flag=(--batch 1 $FAST_FLAGS --depth-bf16) ;;
+        *) echo "sweep_arms: unknown arm $arm" >&2; return 1 ;; esac
       passed=0
       for rep in 1 2; do
         run=$OUT/$arm/n$users/r$rep
