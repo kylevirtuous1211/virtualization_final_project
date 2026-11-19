@@ -8,12 +8,13 @@ every update, checkpointing off must equal G13's bitwise, and the graphs' pred_g
 with the control by G9's criterion (probes/streamsplat_batch_equivalence.py): a mean absolute difference at least
 100x below a mismatched user's, and under 1% of the values off by more than 1e-3; whether they are bitwise equal is
 reported. Run it under python -O, as the --nosync server runs: the static head's isnan asserts wait on the host,
-which graph capture also forbids.
+which graph capture also forbids. With --depth-bf16 (G16) all three servers run the depth model under bf16
+autocast.
 
 docker run --rm --gpus all --network none --user $(id -u):$(id -g) -e HOME=/tmp -e TORCH_HOME=/torch_home \
   -e USER=$USER -v $PWD:$PWD:ro -v $(realpath third_party/StreamSplat):$(realpath third_party/StreamSplat):ro \
   -v ~/.cache/torch:/torch_home:ro -v $(dirname <clip>):$(dirname <clip>):ro \
-  streamsplat:5d686e9 python -O $PWD/probes/streamsplat_graph_equivalence.py <clip>
+  streamsplat:5d686e9 python -O $PWD/probes/streamsplat_graph_equivalence.py <clip> [--depth-bf16]
 The clip is capacity.VIDEO (python3 -c 'import sys; sys.path.insert(0, "bench"); import capacity; print(capacity.VIDEO)').
 """
 import argparse, sys
@@ -28,7 +29,9 @@ if __debug__:
     sys.exit("run under python -O")
 video = sys.argv[1]
 users = list(range(4))
-settings = dict(n=len(users), compile=False, video=video, cache=True, bf16=True, nosync=True)
+settings = dict(n=len(users), compile=False, video=video, cache=True, bf16=True, nosync=True,
+                depth_bf16="--depth-bf16" in sys.argv[2:])
+print("depth_bf16:", settings["depth_bf16"])
 g13_step, _ = capacity.setup_streamsplat_server(argparse.Namespace(**settings, checkpointing=True, graphs=False))
 eager_step, _ = capacity.setup_streamsplat_server(argparse.Namespace(**settings, checkpointing=False, graphs=False))
 graph_step, _ = capacity.setup_streamsplat_server(argparse.Namespace(**settings, checkpointing=False, graphs=True))
