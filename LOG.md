@@ -1024,6 +1024,125 @@ The capacity is still compute-bound: at 10 users the card uses about 5 GB, and d
 
 ---
 
+## G16 - Running Depth Anything V2 under bf16 autocast lets the RTX 6000 Ada serve 14 StreamSplat users at one keyframe per second against 10, for 0.013 dB of keyframe PSNR against G12
+
+**Question.**
+G15's fast server spends 47.6 ms of an 87 ms update in the depth model (Depth Anything V2 ViT-L in TF32, untouched by G11-G14).
+Does running the depth model under bf16 autocast let the RTX 6000 Ada serve more users at one keyframe per user per second, and what does it cost in quality?
+Plan `misty-painting-summit`, G16 version, approved 2026-11-19.
+
+**Setup.**
+- Lane: exploratory; registration in the runner header (ded164d), as approved in plan mode; the header lists what was known when it was written (G15's 11.53 updates/s, capacity 10, depth 47.6 ms; the reviewers' FLOP count) and the dry run and smoke runs that came before it.
+- `--depth-bf16` (bench/capacity.py, 1c39de2): `disparity_of` runs the depth model alone under bf16 autocast with no cast cache, then casts to fp32 for the interpolation and the per-frame min-max; the priming frame and every update use it, and `--graphs` records it.
+- Two arms on the same server code, both batch 1, interleaved at every step, 2 repeats (n = 2 per point):
+  - `fast` = G15's `--batch 1 --cache --bf16 --nosync --no-checkpointing --graphs`, the matched control;
+  - `depthbf16` = `fast` plus `--depth-bf16`, one factor apart.
+- Bug checks first, exit 3 on failure: the graph equivalence probe with `--depth-bf16` under `python -O`; `bench/streamsplat_depth_check.py` on all 64 clip frames (positive control: the depth output is bf16 and the disparity differs; every frame still spans 0..255); every timed run's server ready line must carry `depth_bf16` as its arm says.
+- Step 0: N = batch = 1 back to back (`--period 0 --max-updates 20 --warmup 3`), compile off; gate `depthbf16` / `fast` >= 1.10.
+- Step 1, quality on the 30 DAVIS 2017 val sequences with the authors' `psnr_given` and `psnr_novel` (G8's protocol):
+  - reproducibility first: G12's command rerun on the 2 shortest val sequences (car-shadow, judo), and judo's fp32 depth maps from the changed `davis_bear.py` compared byte for byte with G8's;
+  - bf16 depth maps for all 1,999 val frames, then `eval --bf16` on all 1,849 val windows, paired per window against G12 (the same model precision, only the depth maps differ) and against G8's val windows (full precision);
+  - quality gate: a cumulative mean drop against G8 > 0.5 dB in either metric stops the run before the sweep.
+  - The check differs from the server in three ways, written in the header: G8's DAVIS depth ran in full fp32, the server's in TF32; DAVIS frames give 924x518 depth inputs (2,442 tokens) against the clip's 686x518 (1,813); the evaluation runs `SplatModel.forward`, not the cached server.
+- Step 2: G6's and G15's 1 Hz protocol (period 1 s, phases evenly staggered, 60 s per point, 3 warm-ups, compile off; SLO p95 latency <= 1.0 s, 60/60 updates, no OOM; capacity is the largest N where both repeats pass), grid N in 10 11 12 13 14 15 16 17 18 20 22 24; an arm stops after two consecutive N where neither repeat passes.
+- Selection criterion declared before the sweep: the capacity rule above; quality is not what the arms are selected on (Step 1 reports it).
+- Run 2026-11-19 13:36:00-14:43:00Z at ded164d (every `meta.json`), tree dirty only by untracked files; no code changed after the header's commit; `foreign_procs` is empty in all 26 runs, nothing was redone or aborted.
+
+**Command.**
+```
+bash experiments/capacity/run_G16_streamsplat-depth-bf16.sh           # bug checks, step 0, quality, sweep; resumable
+bash experiments/capacity/run_G16_streamsplat-depth-bf16.sh metrics   # re-derives outputs/capacity/G16/metrics.json and davis/metrics.json, prints the step-0, quality and sweep numbers below
+python3 -c 'import json; d=json.load(open("outputs/capacity/G16/checks/depth_check.json")); print({k: d[k] for k in d if k != "per_frame"})'
+python3 -c 'import json; m=json.load(open("outputs/capacity/G16/metrics.json")); [print(a, n, r, p["peak_alloc_max"]>>20, round(p["svc_p50_mean"],4), round(p["svc_depth_p50_mean"],4), round(p["gpu_util_mean"] or 0), p["updates_min"], p["gpu_mem_mib_max"]) for a in m["points"] for n in sorted(m["points"][a], key=int) for r, p in sorted(m["points"][a][n].items())]'
+for r in fast_r1 fast_r2 depthbf16_r1 depthbf16_r2; do python3 -c 'import json,sys; u=json.load(open(sys.argv[1]))["users"][0]; print(sys.argv[2], round(u["svc_p50"],4), round(u["svc_depth_p50"],4))' outputs/capacity/G16/step0/$r/summary.json $r; done
+```
+
+**Result.**
+The bug checks passed: GRAPH_EQUIVALENCE_OK; the depth model's output was fp32 then bf16 on all 64 frames, the disparity differed, and every frame spans 0..255; every run's ready line carried its arm's `depth_bf16`.
+
+Step 0, back to back at N = 1:
+
+| | `fast` (r1, r2) | `depthbf16` (r1, r2) | `depthbf16` / `fast` |
+|---|---|---|---|
+| updates/s | 11.62, 11.66 | 15.84, 15.59 | 1.350x |
+| service p50 (ms) | 83.9, 84.5 | 60.2, 61.9 | 0.73x |
+| depth stage p50 (ms) | 46.7, 47.5 | 26.5, 28.5 | 0.584x |
+
+The gate passed; `fast` runs 1.0% above G15's 11.53 updates/s.
+The service falls 23.1 ms and the depth stage 19.6 ms; the 3.5 ms between them is a difference of medians and is not attributed.
+
+Depth differences, in levels of 0..255:
+- The server's input on the clip's 64 frames, TF32 against bf16: mean 0.29, max 8, 71% of pixels equal.
+- The 1,999 DAVIS val maps, G8's full fp32 against bf16: mean 0.36, max 36, 67% of pixels equal.
+
+Reproducibility: G12's rerun on car-shadow and judo gives 64 of 64 windows bitwise equal to G12's rows (max change 0.0 dB), so the per-window numbers below have no run-to-run noise floor; judo's fp32 depth maps from the changed `davis_bear.py` equal G8's PNGs byte for byte.
+
+Quality on the 1,849 val windows in 30 sequences:
+
+| metric | G8 (full precision) | G12 (model bf16) | G16 (model and depth bf16) | against G12: mean; per window min to max; windows dropping > 0.5 dB | against G8, cumulative: same columns |
+|---|---|---|---|---|---|
+| `psnr_given` | 37.757 | 37.581 | 37.568 | -0.013; -0.262 to +0.143; 0.0% | -0.189; -0.844 to +0.255; 5.1% (94 windows; G12 alone 4.3%) |
+| `psnr_novel` | 23.761 | 23.750 | 23.749 | -0.001; -0.147 to +0.219; 0.0% | -0.012; -0.528 to +0.439; 0.05% (1 window) |
+
+The quality gate passed (cumulative drops 0.19 and 0.01 dB against 0.5).
+
+The sweep:
+
+| N | `fast` pass | `fast` p95 worst user (s, r1, r2) | `depthbf16` pass | `depthbf16` p95 worst user (s, r1, r2) | GPU memory max (MiB), `fast` / `depthbf16` | GPU utilisation (%, r1, r2), `fast` / `depthbf16` |
+|---|---|---|---|---|---|---|
+| 10 | 2/2 | 0.094, 0.100 | 2/2 | 0.074, 0.077 | 4,928 / 4,766 | 79, 82 / 55, 55 |
+| 11 | 0/2 (57/60 updates) | 3.618, 3.587 | 2/2 | 0.076, 0.076 | 4,930 / 4,768 | 85, 85 / 61, 60 |
+| 12 | 0/2 (52/60) | 8.126, 8.363 | 2/2 | 0.075, 0.075 | 4,932 / 4,880 | 84, 84 / 64, 68 |
+| 13 | not run | | 2/2 | 0.078, 0.074 | - / 4,882 | - / 72, 73 |
+| 14 | not run | | 2/2 | 0.074, 0.087 | - / 4,884 | - / 85, 84 |
+| 15 | not run | | 1/2 (r2 59/60) | 0.376, 1.130 | - / 4,888 | - / 91, 90 |
+| 16 | not run | | 0/2 (57 and 56/60) | 3.617, 4.492 | - / 5,000 | - / 91, 88 |
+| 17 | not run | | 0/2 (52/60) | 8.072, 8.530 | - / 5,002 | - / 88, 88 |
+
+N = 18 to 24 ran for neither arm; each stopped after two consecutive failing N, as registered.
+
+- **Capacity: `fast` 10, `depthbf16` 14** with both repeats; with any repeat, 10 and 15.
+  Neither is at the grid's edge and the grid has no gap next to either, so both are exact on this grid; G15's "10 or 11" for `fast` is 10.
+- **Where the boundary sits**: in both arms N passes up to about 0.89 of the back-to-back rate and fails from about 0.95 (`fast` 10 / 11.64 = 0.86 passes, 11 / 11.64 = 0.945 fails; `depthbf16` 14 / 15.71 = 0.89 passes, 15 / 15.71 = 0.955 passes once in 2).
+  N below the rate is not enough, as G15 read it; why the last 5-10% of the rate cannot be used was not tested.
+- **Latency**: at N = 10 the worst user's p95 is 0.076 s against 0.097 (0.78x); at its capacity of 14, `depthbf16`'s worst user's p95 is 0.074 and 0.087 s.
+  Past capacity both arms queue without bound (p95 3.6-8.5 s).
+- **Service under load**: `depthbf16`'s median service is 64.5-72.0 ms at every N, its depth stage 29.6-38.2 ms.
+  `fast`'s is 85.6-89.2 ms at N = 10 but 96.3-96.7 ms at N = 11 and 12 (depth 57.8-58.0 ms), longer than at its step 0 (84.2 and 47.1 ms) and than G15's `fast` at N = 12 (90.0 ms, depth 50.8 ms), which also ran the GPU at 93-95% against 84% here and delivered 55/60 updates against 52/60; the cause was not tested.
+- **VRAM**: whole-GPU memory at equal N is 52-162 MiB lower with `depthbf16`; live tensors (`peak_alloc`) are equal at equal N (2,682-2,683 MiB at N = 10, 2,732 at N = 12).
+  At capacity, `depthbf16` serves 14 users in 4,884 MiB (349 per user), `fast` 10 users in 4,928 MiB (493 per user); both use 10% of the 49,140 MiB card.
+- **GPU utilisation** (nvidia-smi means) at the largest N each arm ran: `fast` 84% (N = 12), `depthbf16` 88% (N = 17); at capacity, 79-82% and 84-85%.
+- Depth is 44-46% of a `depthbf16` update at step 0 (26.5-28.5 of 60.2-61.9 ms), against 55-56% for `fast`.
+
+**Null.**
+The matched control `fast`, G15's server on the same code, differing only in `--depth-bf16` and interleaved at every step; it reproduces G15 (11.64 against 11.53 updates/s back to back, capacity 10).
+For quality, G12's windows (the same model precision, only the depth maps differ) and G8's (full precision).
+
+**Against the predictions registered in the runner header.**
+- P1 depth stage 0.43-0.60x `fast`, refuted if > 0.80x: **holds** (0.584x, 47.1 to 27.5 ms).
+- P2 step-0 throughput 1.30-1.45x, refuted if < 1.10x: **holds** (1.350x, 11.64 to 15.71 updates/s).
+- P3 depth differences, reported only, the server's frames mean <= 1 level, DAVIS maps <= 3: **holds** (0.29; 0.36).
+- P4 against G12 `psnr_given` 0 to -0.10 dB, `psnr_novel` 0 to -0.05 dB, <= 2% of windows dropping > 0.5 dB, refuted if a mean drops > 0.20 dB or > 5% of windows drop > 0.5 dB: **holds** (-0.013 and -0.001 dB, 0.0%); cumulative against G8 `psnr_given` 0.18-0.28 dB: **holds** (0.189).
+- P5 `fast` 10 or 11, `depthbf16` 15 (14-16), refuted if `depthbf16`'s <= `fast`'s: **holds** (10; 14, the low end of the range).
+- P6 each arm's capacity is the largest grid N below its step-0 throughput (11 and 15), refuted if either is more than one grid step lower: **not refuted, missed in both arms** (10 and 14, one step lower each).
+- P7 `fast` step 0 within ±5% of 11.53: **holds** (+1.0%).
+- P8 p95 at N = 10 below 0.85x `fast`, refuted if not below 0.9x: **holds** (0.78x).
+- P9 whole-GPU memory at equal N within ±0.5 GB, refuted if it rises > 1.5 GB: **holds** (-0.05 to -0.16 GB).
+- P10 GPU utilisation >= 85% at the largest N each arm ran, refuted if < 78%: **holds for `depthbf16`** (88%), **missed by 1 point for `fast`** (84%), not refuted.
+- Both gates passed; none of the plan's stop conditions was triggered.
+
+**Cost.**
+67 min wall clock: bug checks 1.5 min, step 0 3.6 min, quality 19 min (reproducibility 1.3, depth maps 4.6, evaluation 13), sweep 43 min; 26 timed runs (4 at step 0, 22 in the sweep: 6 `fast`, 16 `depthbf16`), none redone; the lab's own GPU, no charge.
+
+**What it overturns.**
+- G15's reading that every N below the back-to-back rate passes at 1 Hz (G15 Result): `fast` fails at N = 11, below its 11.64 updates/s, which G15 had not run; in both arms N passes up to about 0.89 of the rate.
+- G15's open capacity "10 or 11" is 10.
+- G15's "depth is about half of each update" holds for `fast` (55-56% here); with `--depth-bf16` it is 44-46%, and the card serves 14 users at 1 Hz in 4.9 GB, under 10% of its memory.
+No other entry is refuted; no earlier entry changed the depth model's precision.
+The configuration carried forward is `fast` plus `--depth-bf16`.
+
+---
+
 ## Refuted claims
 
 | Claim | Refuted by | Note |
@@ -1046,3 +1165,4 @@ The capacity is still compute-bound: at 10 users the card uses about 5 GB, and d
 | Replaying the cached bf16 update as CUDA graphs raises back-to-back StreamSplat throughput 1.08-1.20x, about G10's idle share (G14 P1) | G14 | 1.052x at batch 1 (not refuted, below the range), 0.993x at batch 4 (refuted). |
 | The CUDA graphs hold about 2 GB more VRAM in bf16 (G14 P2) | G14 | 0.2-0.5 GB at batch 1; 4.2 GB at batch 4, with graphs for batch sizes 1 to 4. |
 | The fast StreamSplat server runs 7-9 updates/s back to back and serves 6 (5-8) users at 1 Hz, at 0.11-0.16 s p95 with 4 users (G15 estimates) | G15 | 11.53 updates/s, 10 users (11 not run), 0.090 s; all beyond the estimates in the favourable direction, no registered refutation criterion met. |
+| The 1 Hz capacity is the largest N below the server's back-to-back throughput (G15's reading; G16 P6) | G16 | `fast` fails at 11 below its 11.64 updates/s (57/60 updates, p95 3.6 s) and `depthbf16` passes 15 below 15.71 in 1 of 2 repeats: capacity 10 and 14, one grid step below the rule in both arms, inside P6's tolerance; N passed up to about 0.89 of the rate. |
