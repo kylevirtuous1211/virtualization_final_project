@@ -1,0 +1,41 @@
+\section{Related Work}
+\label{sec:related}
+
+% Sources: the Markdown survey report in docs/reports/, docs/research_notes/, docs/reading_notes.md.
+
+3D Gaussian Splatting~\cite{kerbl2023gaussian} has drawn architecture work that makes rendering one scene on one device cheaper.
+GSCore~\cite{gscore2024} profiles 3DGS rendering on an edge GPU and a desktop GPU, finds that sorting and rasterization dominate it, and adds hardware support for those stages.
+SCARF~\cite{scarf2026} is the only systems paper on feed-forward 3DGS reconstruction that our search found.
+It profiles the encoders of cost-volume feed-forward models on an edge GPU, reports that one encoder pass costs far more than rasterizing one view, with depth search dominating memory traffic, and proposes a hardware accelerator for these encoders.
+SCARF serves a single stream, and the paper does not consider several users or batching.
+Our server does not render, and on a workstation GPU an update's time goes mostly to the depth model and the reconstruction model, the depth model alone taking about half of it in \opt{}. % G5, G15, G16 (depth 55-56% of an Opt update at step 0)
+
+A second line of work streams 3DGS or volumetric content over a network.
+MuV2~\cite{muv2_2024} serves several mobile users of volumetric video from one edge server and one WiFi access point, where each baseline design saturates the wireless link, the GPU's hardware video encoder, or both.
+It serves more users by letting nearby users share edge-rendered views, so that the encoding work stops growing with the number of users.
+L3GS~\cite{l3gs2025}, LTS~\cite{lts2025} and LMG~\cite{lmg2026} stream layered static, dynamic and mesh-Gaussian scenes, and MoQSplat~\cite{moqsplat2026} sends 3DGS progressively over Media over QUIC with view-dependent priorities.
+Alpay et al.~\cite{partialgs2026} split dynamic Gaussian content into independently renderable clusters and schedule them by deadline and by render utility per byte.
+GaussAnything~\cite{gaussanything2026} streams an evolving Gaussian scene from an online SLAM host to a standalone VR headset under a fixed budget of resident Gaussians on the headset.
+Siekkinen et al.~\cite{siekkinen2026} stream a 3DGS proxy built online from game-engine render buffers to a client that renders it locally, and leave concurrent clients outside their evaluation.
+WebSplatter~\cite{websplatter2026} renders 3DGS in the browser with WebGPU across devices.
+The resources these systems schedule are network bandwidth, hardware video encoders and the client's GPU.
+None of them measures many users sharing the GPU that builds the Gaussians.
+
+GPU sharing mechanisms and DNN serving systems describe how a saturated GPU behaves, and Section~\ref{sec:discussion} relates them to our measurements.
+NVIDIA describes MPS as useful when each process does not generate enough work to saturate the GPU~\cite{nvidia_mps}, and Gilman and Walls~\cite{gilman2021} find that time-slicing never overlaps two tasks, while MPS suits kernels that leave part of the GPU unused.
+Clockwork~\cite{clockwork2020} observes that running DNN inferences one at a time gives throughput close to running them concurrently, with far less latency variability, and AlpaServe~\cite{alpaserve2023} reports that the benefit of multiplexing models with model parallelism shrinks as the arrival rate approaches the cluster's peak serving rate.
+A second group of systems protects one latency-critical tenant from best-effort tenants.
+REEF~\cite{reef2022} preempts best-effort kernels at microsecond scale, Orion~\cite{orion2024} dispatches each operator by its profiled resource needs and its tenant's priority, and TGS~\cite{tgs2023} throttles opportunistic containers from below the container layer.
+Our setting has many tenants of equal priority that run the same heavy model and together saturate the GPU.
+
+Sharing one GPU among interactive sessions has a longer history in cloud gaming.
+gVirt~\cite{gvirt2014} virtualizes an Intel GPU with mediated pass-through and switches between virtual machines on a fixed time slice.
+Because most GPUs are not preemptive, gVirt waits for a guest's ring buffer to idle before switching and bounds each guest's queued commands for a coarse quality of service.
+gScale~\cite{gscale2016} found that gVirt's static partition of the graphics memory address space limited how many virtual GPUs one device could host, and raised that number by sharing the address space dynamically.
+PilotFish~\cite{pilotfish2022} runs deep learning training in the GPU cycles that cloud games leave idle, and shows that co-located games interfere with each other before the GPU is fully utilized.
+SwarmMap~\cite{swarmmap2022} scales collaborative visual SLAM at the edge, where added agents' requests queue in the server's pipeline as ours do past capacity, and serves more agents by prioritizing requests by each agent's state.
+
+We found no paper in which many users share one GPU for feed-forward 3DGS reconstruction and the latency of each user is measured.
+Our search used keywords over systems, architecture, networking and multimedia venues and arXiv, so it can miss work described in other terms.
+SCARF studies the reconstruction workload for one stream, MuV2 counts the users one edge server serves for volumetric video, and the serving systems treat requests as independent of each other.
+This report measures the combined setting: the latency of each of many equal users who run the same feed-forward model on one GPU. % G6, G15, G16

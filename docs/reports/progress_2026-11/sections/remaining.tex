@@ -1,0 +1,38 @@
+\section{Remaining Work}
+\label{sec:remaining}
+
+The next step is a front-end demonstration of the measured capacity.
+Several users each stream video to one server that runs \optd{}, and each user's browser renders that user's Gaussians with WebGPU, for example with WebSplatter~\cite{websplatter2026}.
+A dashboard beside the rendered views shows the users served, each user's update latency and the GPU memory in use, from the readings the harness already records.
+Adding users one at a time should expose the limit that the capacity sweep found on the test clip.
+The demonstration also adds work the harness omits, serializing each update's Gaussians and sending them to a browser, and whether this lowers the capacity of \optd{} is the first question it answers.
+
+Three extensions follow, in this order.
+The first is the server's behavior beyond capacity.
+Our harness admits every user and drops no update, so past capacity each user's queue grows for as long as the run lasts. % G2
+Two and three users past the capacity of \optd{}, the worst user's p95 latency reached 3.6--8.5~s within a 60~s run. % G16
+We plan to add two policies and measure each user's tail latency and the fairness of latency across users under overload.
+The first is admission control that refuses a new user when the admitted users' declared update rates would exceed the measured throughput, as Clockwork rejects requests that would miss their deadline~\cite{clockwork2020}.
+The second keeps only each user's latest keyframe, replacing a queued update that has not started, since it loses its value once a newer keyframe exists.
+Fairness needs its own measurement because sharing modes with equal capacity can still give users different latency, as time-slicing and MPS did at five AnySplat users.
+
+The second extension runs each user in its own container under Kubernetes.
+The NVIDIA device plugin offers a time-slicing mode, documented as not isolating the workloads that share a GPU, and an experimental MPS mode that gives each replica an equal share of memory and compute~\cite{k8s_device_plugin}.
+We found no published measurement of how well either mode isolates users, and plan to rerun the capacity sweep with one pod per user under each mode.
+
+The third extension repeats the measurements, with the same configurations and capacity rule, on the H200 GPUs of the nano4 cluster.
+The H200 also supports MIG, which gives each instance its own L2 cache and DRAM bandwidth and isolates faults between instances~\cite{nvidia_mig}, while MPS documents only a limited form of error containment between its clients~\cite{nvidia_mps}.
+The RTX 6000 Ada does not support MIG~\cite{nvidia_mig}, and an earlier probe found MIG disabled on the nano4 node and in its scheduler, so a MIG configuration depends on the cluster's administrators enabling it. % not in LOG.md: nano4 probe job 682344, 2026-11-02, project memory note
+
+\section{Conclusion}
+
+We asked how many users one RTX 6000 Ada serves when each user sends one keyframe per second to a feed-forward 3DGS reconstruction server and every user must keep p95 latency within 1~s. % G6, G15, G16
+Time-slicing and MPS served the same number of users in every setting we measured, and batching users' updates into one call lowered throughput. % G2, G3, G6, G7, G9
+Reducing the work per update raised the capacity from 4 users with \serial{} to 10 with \opt{} and 14 with \optd{}, for 0.19~dB of keyframe PSNR on the DAVIS 2017 validation set against full precision. % G15, G16
+At 14 users the card held 4,884~MiB, under 10\% of its memory, so memory was not the limit. % G16
+The capacity results hold for one GPU model and one test clip that every user replays, with two repeats per point, and the batching comparison ran once per batch size. % G2, G3, G6, G7, G9, G15, G16
+
+\section*{Availability}
+
+The measurement harness, the experiment scripts and the figure script are in the project repository, and every script after the first two experiments carries its predictions, written before the run. % G1 and G2 have no runner header; G3-G16 runners do
+The project's experiment log records each number in this report with the command that re-derives it from the run's output.

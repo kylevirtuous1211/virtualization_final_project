@@ -1,0 +1,36 @@
+% Discussion. Every line that carries a number ends in a comment naming the LOG.md entry it comes from.
+% The literature statements come from docs/reports/3DGS 與 GPU 虛擬化系統論文.md; none of their numbers is quoted here.
+\section{Discussion}
+\label{sec:discussion}
+
+MPS served no more users than time-slicing and batching across users did not raise throughput, while reducing the work per update raised capacity from 4 to 14 users at one keyframe per user per second. % G2, G3, G6, G7, G9, G15, G16
+Our interpretation is that the update of a single user already keeps this GPU busy, so a sharing mechanism can only divide the same throughput among more users.
+Several measurements are consistent with that reading.
+Under both time-slicing and MPS the saturated throughput stayed at 4.62--4.73 updates/s, below the 5.20 that a single user reaches back to back. % G5, G6
+Batching raised the nvidia-smi utilization from 72\% to 96\% and lowered throughput. % G9
+Removing the host waits from the model calls and replaying the update as CUDA graphs each recovered at most 5.2\%, although the profile had shown the GPU idle for 14--22\% of a forward pass. % G10, G13, G14
+We did not measure SM occupancy, so the reading rests on throughput and nvidia-smi utilization, and the kernels of one update may still leave some SMs idle.
+
+The literature on GPU sharing predicts this outcome for a saturated GPU.
+NVIDIA documents MPS as useful when the work of each process is too small to fill the GPU~\cite{nvidia_mps}.
+Gilman and Walls compared priority streams, time-slicing and unrestricted MPS and found MPS best suited to kernels that do not use all of the GPU's resources, while time-slicing never runs two tasks at once~\cite{gilman2021}.
+Clockwork reports that running one inference at a time reaches throughput close to that of running several concurrently, and that concurrency makes latency much less predictable~\cite{clockwork2020}.
+AlpaServe finds that careful model placement stops helping once the request rate approaches the peak service rate and every model is saturated~\cite{alpaserve2023}.
+None of these studies used a 3D reconstruction workload, and we did not test their explanations on ours.
+The levers that moved capacity were the ones that shrink each update: the feature cache, bf16 on the reconstruction model and bf16 on the depth model (Table~\ref{tab:ablation}).
+
+Memory was never the binding resource: at capacity the card held under 5,000~MiB, about 10\% of its 49,140~MiB, and live tensors grow by about 25~MiB per added user in both optimized configurations. % G15, G16 (24.6 MiB per user for Opt in G15; 24.7 for Opt+DepthBF16 from peak_alloc at 10 and 17 users in outputs/capacity/G16/metrics.json)
+The other 90\% of the memory could pay for work saved per update, as the feature cache did for 37~MiB per user. % G11, G15, G16
+Whether more of each user's previous computation can be kept and reused remains open, since we have tried no other such trade.
+
+Capacity falls short of the back-to-back throughput: the SLO held up to about 0.89 of that rate in both optimized configurations, so a planner that divides the back-to-back rate by the per-user update rate would overestimate capacity by one user. % G16
+We did not test whether the slower service under overload or queueing alone sets this boundary, so the factor of about 0.89 is an empirical figure for this clip on this GPU and needs a sweep to confirm it elsewhere. % G16
+
+These results have a narrow scope.
+All timing and capacity measurements use one GPU model, an RTX 6000 Ada with 49,140~MiB, and one test clip, a KITTI-360 sequence~\cite{kitti360} that every user replays. % G5, G15, G16
+Users send updates periodically with evenly staggered phases, and random arrivals were not tested. % G6, G15, G16
+Each point has 2 repeats, so differences of a few percent between configurations indicate a direction only. % G15, G16
+Quality was measured on the model's uncached forward pass over DAVIS, and the served path with the feature cache and CUDA graphs was checked for equivalence only on the test clip. % G11, G12, G14, G16
+No network or browser is in the loop yet, so latency ends when the server finishes an update and excludes transmission and rendering.
+Finally, the same configuration's service time under saturation differed by about 7\% between two sweeps: \opt{} at 12 users took 90.0~ms per update in the first and 96.6--96.7~ms in the second, and we did not test why. % G15, G16 (96.6-96.7 ms at 12 users from outputs/capacity/G16/metrics.json; LOG gives 96.3-96.7 for 11 and 12)
+Absolute numbers compared across experiments carry this variation, while ratios against interleaved controls do not. % G11, G12

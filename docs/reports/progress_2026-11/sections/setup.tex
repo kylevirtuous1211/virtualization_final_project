@@ -1,0 +1,96 @@
+\section{Experimental Setup}
+\label{sec:setup}
+
+\subsection{Workload and serving model}
+
+Each user streams live video and sends the server one keyframe per period $T$, and the server turns every keyframe into an update of that user's Gaussian scene (Figure~\ref{fig:system}).
+All users replay the KITTI-360~\cite{kitti360} clip included with AnySplat's examples, 64 frames at 448$\times$336, each user from its own offset. % G5 (64 frames); 448x336: bench/capacity.py VIDEO; offsets: G10, bench/capacity.py
+The clip serves only for timing, since an update's cost depends only on the input's shape. % G5
+An AnySplat~\cite{anysplat2025} update reconstructs the user's latest $k$ frames at 448$\times$448, with $k$ from 2 to 16. % G1
+A StreamSplat~\cite{streamsplat2026} update takes one new keyframe at 512$\times$288, estimates its depth and predicts 73,728 Gaussians for the pair of the previous and the new keyframe. % G5
+Service time covers uploading the frames and the GPU work up to a device synchronization, and rendering is not timed. % G1, G5
+
+User $r$ of $N$ releases its $j$-th update at $t_0 + (r/N + j)\,T$, so the phases are evenly spread over the period, an arrival pattern that favors time-slicing. % G2, G3
+Latency is an update's finish time minus its release time, so it includes queueing behind the same user's earlier updates, and no keyframe is ever dropped. % G2
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+    font=\footnotesize, node distance=3mm and 8mm, >={Stealth[length=4pt]}, % layout only, no data
+    stage/.style={draw, rounded corners=2pt, align=center, text width=26mm, minimum height=6mm, inner sep=2pt}, % layout only
+    user/.style={draw, align=center, minimum width=13mm, minimum height=5mm, inner sep=2pt}, % layout only
+    future/.style={draw, dashed, rounded corners=2pt, align=center, text width=17mm, inner sep=2pt}, % layout only
+  ]
+  \node[stage] (upload) {Upload keyframe};
+  \node[stage, below=of upload] (depth) {Depth model\\{\scriptsize Depth Anything}\\{\scriptsize V2 ViT-L}}; % layout only
+  \node[stage, below=of depth] (update) {StreamSplat update\\{\scriptsize previous and new keyframe}};
+  \node[stage, below=of update] (gauss) {Gaussians of the user's scene};
+  \node[stage, right=4mm of update, text width=14mm, fill=black!6] (cache) {\scriptsize Cached features of the previous keyframe}; % layout only
+  \node[draw, rounded corners=3pt, fit=(upload)(gauss)(cache), inner sep=2.5mm, label={above:One GPU server}] (server) {}; % layout only
+  \node[user, left=of upload] (ua) {User 1}; % layout only
+  \node[user, below=2mm of ua] (ub) {User 2}; % layout only
+  \node[below=0mm of ub] (dots) {$\vdots$}; % layout only
+  \node[user, below=0mm of dots] (un) {User $N$}; % layout only
+  \node[future, left=of gauss] (future) {Future: deltas to each user's WebGPU browser};
+  \draw[->] (ua.east) -- (upload.west);
+  \draw[->] (ub.east) -- (upload.west);
+  \draw[->] (un.east) -- (upload.west);
+  \draw[->] (upload) -- (depth);
+  \draw[->] (depth) -- (update);
+  \draw[->] (update) -- (gauss);
+  \draw[<->] (cache) -- (update);
+  \draw[->, dashed] (gauss.west) -- (future.east);
+  \draw[->, dashed] (future.north) -- (future.north |- un.south);
+\end{tikzpicture}
+\caption{Serving model.
+Each of $N$ users sends one keyframe per period $T$, and the server runs the depth model on it and updates the user's Gaussians from the previous and the new keyframe.
+\opt{} and \optd{} keep the previous keyframe's features, and \serial{} recomputes them.
+The dashed part is future work.}
+\label{fig:system}
+\end{figure}
+
+\subsection{Configurations compared}
+
+We compare three ways of placing $N$ users on the GPU.
+The first gives every user its own process with its own copy of the weights (a StreamSplat user is a container), sharing the GPU by the driver's default time-slicing or through NVIDIA MPS~\cite{nvidia_mps} with no per-client limit. % G1, G2, G6
+The second is one server holding one copy of the weights that, at each step, takes the pending updates, at most one per user and oldest first, up to a batch size $b$, and runs them as one batch. % G9
+The third is the same server at batch 1, whose baseline, \serial{}, runs the released code's forward pass in TF32, encoding both keyframes of the pair at every update, with the authors' training-time block checkpointing on and no compilation. % G9, G15
+We then added five optimizations one at a time, each timed against an interleaved control that lacks only that optimization. % G11-G14, G16
+They are a per-user cache of the previous keyframe's features; bf16 autocast on the reconstruction model; removal of the host synchronizations in the model calls; CUDA graphs~\cite{nvidia_cuda_guide} for the depth and model stages, which require block checkpointing off; and bf16 autocast on the depth model. % G11, G12, G13, G14, G16
+\opt{} combines the first four, and \optd{} adds the fifth. % G15, G16
+Batching and the cache changed the Gaussians by at most $4.7\times10^{-6}$ in mean absolute value in FP32, against $2.0\times10^{-2}$ or more between two different users, and the two bf16 changes alter the output, so we measured their cost in quality. % G9, G11, G12, G16
+
+\subsection{Measurement protocol}
+
+The back-to-back throughput measurement releases every update at once, discards 3 warm-up updates, times the next 20, and divides the number of updates by the time from the first start to the last finish, with $N=b$ users for the batching server so that every step is a full batch. % G5, G9
+
+The capacity sweep releases one update per user per period for 60~s after 3 warm-up updates, with a period of 1~s except for AnySplat at $k=2$ (0.5~s) and one StreamSplat sweep at three keyframes per second. % G2, G3, G6, G7, G15, G16
+A point meets the service-level objective (SLO) if the worst user's 95th-percentile latency is at most 1.0~s ($1/3$~s at three keyframes per second), every user receives every update, and no process runs out of memory. % G2, G6, G7
+Each point ran twice, and the capacity is the largest $N$ at which both repeats meet the SLO. % G2, G3, G6, G7, G15, G16
+Each sweep's grid of $N$ was fixed before the run, its two configurations run interleaved point by point, and a configuration stops after two consecutive values of $N$ at which neither repeat meets the SLO. % stop rule: G2; registered grids: G3, G6, G7, G15, G16 (G2's grid is in bench/g2.sh, not in LOG.md); interleaving: G2, G6, G15, G16
+
+Other projects share the machine, so the harness waits for 30~s of an empty GPU before each run and reruns any run during which another compute process appears, which happened 5 times. % G2 (2), G9 (1), G12 (2); bench/sweep_lib.sh
+
+\subsection{Metrics}
+
+We report users served (the capacity), the worst user's p95 latency (nearest rank), and the median service time per update with its depth part, which covers the upload, the depth model and the normalization. % G2, G5, G16
+Whole-GPU memory is the largest \texttt{memory.used} that \texttt{nvidia-smi} reports, sampled every 0.5~s, including the allocator's reserve, and live tensor memory is PyTorch's peak allocated memory, which excludes it. % bench/capacity.py sample, summarise
+GPU utilization is the mean of \texttt{nvidia-smi}'s utilization samples, the share of time in which any kernel ran, read only at saturation because below it the value scatters between repeats. % G15
+
+\subsection{Quality evaluation}
+
+We measure quality, as the paper does, on the 30 validation sequences (1,999 frames) of DAVIS 2017~\cite{davis2017}, taking every run of six consecutive frames as a window, 1,849 windows in all, whose first and last frames are the model's keyframes. % G8
+We use the authors' evaluation code at 256$\times$256: keyframe PSNR (\texttt{psnr\_given}) over the two keyframes, the model's inputs, and middle-frame PSNR (\texttt{psnr\_novel}) over the four middle frames, which the model never sees. % G8
+
+The middle frames score far lower, as in the paper~\cite{streamsplat2026}; our untested interpretation is that a keyframe's render largely reproduces an input, while at a middle time the model moves the Gaussians along predicted velocities without observing the motion, occlusions or newly visible content in between.
+
+Our reproduction gives 37.76~dB keyframe and 23.76~dB middle-frame PSNR against the paper's 37.83 and 23.66~dB, with 480p frames and compilation off. % G8
+An earlier attempt with our own metric gave 27.51~dB on one training sequence, below the 30~dB we had set for continuing; by the authors' protocol that sequence scores 35.94~dB. % G4, G8
+For the bf16 changes we rerun the evaluation under bf16 autocast and compare every window with the full-precision run (Table~\ref{tab:quality}). % G12, G16
+
+\subsection{Hardware and software}
+
+The GPU is an NVIDIA RTX 6000 Ada Generation with 48~GB (49,140~MiB in \texttt{nvidia-smi}) on driver 595.91.07. % G2; driver: meta.json of the G2, G3, G6, G15 and G16 runs
+StreamSplat runs from the authors' code at commit 5d686e9 with their released weights, in a Docker image built from their environment with PyTorch 2.4.1, CUDA 12.4 and xFormers 0.0.28.post1. % G4; docker/streamsplat/Dockerfile, third_party/StreamSplat/environment.yml
+The per-user StreamSplat sharing runs keep the authors' default of \texttt{torch.compile}, and every server run leaves it off. % G5; G9-G16
+AnySplat runs from commit 5f5e208 with pinned weights under PyTorch 2.2.0 and CUDA 12.1. % G1

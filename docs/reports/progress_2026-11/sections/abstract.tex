@@ -1,0 +1,9 @@
+\begin{abstract}
+Feed-forward 3D Gaussian Splatting models reconstruct a scene from video in one network pass, fast enough to keep a live 3D model of each user's camera stream.
+Serving many users from one GPU is a GPU virtualization problem: how many users fit, and with what latency guarantee.
+We measure capacity, the largest number of users at which every user's 95th-percentile update latency stays within 1~s at one keyframe per user per second, on one NVIDIA RTX 6000 Ada running the StreamSplat model. % G6, G15, G16
+NVIDIA MPS served no more users than the default time-slicing in four settings across two models, and batching several users' updates into one call lowered throughput. % G2, G3, G6, G7, G9
+Reducing the work per update raised capacity from 4 users with the released inference code to 10 with a feature cache, bfloat16 arithmetic and CUDA graphs, and to 14 with the depth model also in bfloat16. % G15, G16
+The cost is a keyframe PSNR 0.19~dB below full precision on DAVIS 2017 val, and serving the 14 users takes 4,884~MiB of GPU memory, about 10\% of the card. % G16 (whole-GPU nvidia-smi memory.used at N = 14)
+This progress report covers the server; a browser front end comes next.
+\end{abstract}

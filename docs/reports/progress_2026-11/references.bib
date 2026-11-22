@@ -1,0 +1,332 @@
+% References for the progress report.
+% Each entry was checked on 2026-11-22 against the source named in its comment.
+
+% ---------------------------------------------------------------- models and data
+
+% arXiv 2308.04079 journal-ref; Crossref DOI 10.1145/3592433.
+@article{kerbl2023gaussian,
+  author    = {Bernhard Kerbl and Georgios Kopanas and Thomas Leimk{\"u}hler and George Drettakis},
+  title     = {{3D} {Gaussian} Splatting for Real-Time Radiance Field Rendering},
+  journal   = {{ACM} Transactions on Graphics},
+  volume    = {42},
+  number    = {4},
+  month     = jul,
+  year      = {2023},
+  doi       = {10.1145/3592433}
+}
+
+% arXiv 2505.23716; Crossref DOI 10.1145/3763326 (ACM TOG 44(6), December 2025).
+@article{anysplat2025,
+  author    = {Lihan Jiang and Yucheng Mao and Linning Xu and Tao Lu and Kerui Ren and Yichen Jin and Xudong Xu and Mulin Yu and Jiangmiao Pang and Feng Zhao and Dahua Lin and Bo Dai},
+  title     = {{AnySplat}: Feed-forward {3D} {Gaussian} Splatting from Unconstrained Views},
+  journal   = {{ACM} Transactions on Graphics},
+  volume    = {44},
+  number    = {6},
+  month     = dec,
+  year      = {2025},
+  doi       = {10.1145/3763326}
+}
+
+% arXiv 2506.08862 comment: "Accepted by ICLR 2026".
+@inproceedings{streamsplat2026,
+  author    = {Zike Wu and Qi Yan and Xuanyu Yi and Lele Wang and Renjie Liao},
+  title     = {{StreamSplat}: Towards Online Dynamic {3D} Reconstruction from Uncalibrated Video Streams},
+  booktitle = {International Conference on Learning Representations ({ICLR})},
+  year      = {2026},
+  note      = {arXiv:2506.08862}
+}
+
+% arXiv 2406.09414; NeurIPS 2024 poster page neurips.cc/virtual/2024/poster/94431.
+@inproceedings{depthanythingv2,
+  author    = {Lihe Yang and Bingyi Kang and Zilong Huang and Zhen Zhao and Xiaogang Xu and Jiashi Feng and Hengshuang Zhao},
+  title     = {Depth {Anything} {V2}},
+  booktitle = {Advances in Neural Information Processing Systems ({NeurIPS})},
+  year      = {2024},
+  note      = {arXiv:2406.09414}
+}
+
+% arXiv 1704.00675.
+@misc{davis2017,
+  author       = {Jordi Pont-Tuset and Federico Perazzi and Sergi Caelles and Pablo Arbel{\'a}ez and Alex Sorkine-Hornung and Luc {Van Gool}},
+  title        = {The 2017 {DAVIS} Challenge on Video Object Segmentation},
+  howpublished = {arXiv:1704.00675},
+  year         = {2017}
+}
+
+% arXiv 2109.13410; Crossref DOI 10.1109/TPAMI.2022.3179507 (online 2022, issue 45(3), March 2023).
+@article{kitti360,
+  author    = {Yiyi Liao and Jun Xie and Andreas Geiger},
+  title     = {{KITTI-360}: A Novel Dataset and Benchmarks for Urban Scene Understanding in {2D} and {3D}},
+  journal   = {{IEEE} Transactions on Pattern Analysis and Machine Intelligence},
+  volume    = {45},
+  number    = {3},
+  pages     = {3292--3310},
+  year      = {2023},
+  doi       = {10.1109/TPAMI.2022.3179507}
+}
+
+% ---------------------------------------------------------------- vendor documentation
+
+% Page title "Multi-Process Service"; the URL redirects to /deploy/mps/latest/.
+@misc{nvidia_mps,
+  author       = {{NVIDIA Corporation}},
+  title        = {Multi-Process Service},
+  howpublished = {\url{https://docs.nvidia.com/deploy/mps/index.html}},
+  year         = {2026},
+  note         = {Accessed 2026-11-22}
+}
+
+% Page title "NVIDIA Multi-Instance GPU User Guide".
+@misc{nvidia_mig,
+  author       = {{NVIDIA Corporation}},
+  title        = {{NVIDIA} Multi-Instance {GPU} User Guide},
+  howpublished = {\url{https://docs.nvidia.com/datacenter/tesla/mig-user-guide/}},
+  year         = {2026},
+  note         = {Accessed 2026-11-22}
+}
+
+% Repository title "NVIDIA device plugin for Kubernetes".
+@misc{k8s_device_plugin,
+  author       = {{NVIDIA Corporation}},
+  title        = {{NVIDIA} Device Plugin for {Kubernetes}},
+  howpublished = {\url{https://github.com/NVIDIA/k8s-device-plugin}},
+  year         = {2026},
+  note         = {Accessed 2026-11-22}
+}
+
+% Page title "CUDA Programming Guide"; the old cuda-c-programming-guide URL redirects here.
+@misc{nvidia_cuda_guide,
+  author       = {{NVIDIA Corporation}},
+  title        = {{CUDA} Programming Guide},
+  howpublished = {\url{https://docs.nvidia.com/cuda/cuda-programming-guide/}},
+  year         = {2026},
+  note         = {Accessed 2026-11-22}
+}
+
+% ---------------------------------------------------------------- GPU sharing and DNN serving
+
+% arXiv 2110.00459; Crossref DOI 10.1016/j.peva.2021.102234 (IFIP Performance 2021 issue).
+@article{gilman2021,
+  author    = {Guin Gilman and Robert J. Walls},
+  title     = {Characterizing Concurrency Mechanisms for {NVIDIA} {GPUs} under Deep Learning Workloads},
+  journal   = {Performance Evaluation},
+  volume    = {151},
+  pages     = {102234},
+  year      = {2021},
+  doi       = {10.1016/j.peva.2021.102234}
+}
+
+% USENIX page osdi20/presentation/gujarati; arXiv 2006.02464.
+@inproceedings{clockwork2020,
+  author    = {Arpan Gujarati and Reza Karimi and Safya Alzayat and Wei Hao and Antoine Kaufmann and Ymir Vigfusson and Jonathan Mace},
+  title     = {Serving {DNNs} like {Clockwork}: Performance Predictability from the Bottom Up},
+  booktitle = {Proceedings of the 14th {USENIX} Symposium on Operating Systems Design and Implementation ({OSDI})},
+  pages     = {443--462},
+  publisher = {{USENIX} Association},
+  year      = {2020}
+}
+
+% USENIX page osdi23/presentation/li-zhouhan; arXiv 2302.11665.
+@inproceedings{alpaserve2023,
+  author    = {Zhuohan Li and Lianmin Zheng and Yinmin Zhong and Vincent Liu and Ying Sheng and Xin Jin and Yanping Huang and Zhifeng Chen and Hao Zhang and Joseph E. Gonzalez and Ion Stoica},
+  title     = {{AlpaServe}: Statistical Multiplexing with Model Parallelism for Deep Learning Serving},
+  booktitle = {Proceedings of the 17th {USENIX} Symposium on Operating Systems Design and Implementation ({OSDI})},
+  pages     = {663--679},
+  publisher = {{USENIX} Association},
+  year      = {2023}
+}
+
+% USENIX page osdi22/presentation/han (the system is called REEF).
+@inproceedings{reef2022,
+  author    = {Mingcong Han and Hanze Zhang and Rong Chen and Haibo Chen},
+  title     = {Microsecond-scale Preemption for Concurrent {GPU}-accelerated {DNN} Inferences},
+  booktitle = {Proceedings of the 16th {USENIX} Symposium on Operating Systems Design and Implementation ({OSDI})},
+  pages     = {539--558},
+  publisher = {{USENIX} Association},
+  year      = {2022}
+}
+
+% Crossref DOI 10.1145/3627703.3629578.
+@inproceedings{orion2024,
+  author    = {Foteini Strati and Xianzhe Ma and Ana Klimovic},
+  title     = {{Orion}: Interference-aware, Fine-grained {GPU} Sharing for {ML} Applications},
+  booktitle = {Proceedings of the Nineteenth European Conference on Computer Systems ({EuroSys})},
+  pages     = {1075--1092},
+  publisher = {{ACM}},
+  year      = {2024},
+  doi       = {10.1145/3627703.3629578}
+}
+
+% USENIX page nsdi23/presentation/wu (the system is called TGS).
+@inproceedings{tgs2023,
+  author    = {Bingyang Wu and Zili Zhang and Zhihao Bai and Xuanzhe Liu and Xin Jin},
+  title     = {Transparent {GPU} Sharing in Container Clouds for Deep Learning Workloads},
+  booktitle = {Proceedings of the 20th {USENIX} Symposium on Networked Systems Design and Implementation ({NSDI})},
+  pages     = {69--85},
+  publisher = {{USENIX} Association},
+  year      = {2023}
+}
+
+% ---------------------------------------------------------------- virtualization
+
+% USENIX OSDI '02 abstract page legacy/event/osdi02/tech/waldspurger.html; Crossref DOI 10.1145/844128.844146 (pages 181-194).
+@inproceedings{waldspurger2002,
+  author    = {Carl A. Waldspurger},
+  title     = {Memory Resource Management in {VMware} {ESX} Server},
+  booktitle = {Proceedings of the 5th Symposium on Operating Systems Design and Implementation ({OSDI})},
+  pages     = {181--194},
+  publisher = {{USENIX} Association},
+  year      = {2002}
+}
+
+% USENIX page atc14/technical-sessions/presentation/tian (the system is called gVirt).
+@inproceedings{gvirt2014,
+  author    = {Kun Tian and Yaozu Dong and David Cowperthwaite},
+  title     = {A Full {GPU} Virtualization Solution with Mediated Pass-Through},
+  booktitle = {Proceedings of the {USENIX} Annual Technical Conference ({ATC})},
+  pages     = {121--132},
+  publisher = {{USENIX} Association},
+  year      = {2014}
+}
+
+% USENIX page atc16/technical-sessions/presentation/xue.
+@inproceedings{gscale2016,
+  author    = {Mochi Xue and Kun Tian and Yaozu Dong and Jiacheng Ma and Jiajun Wang and Zhengwei Qi and Bingsheng He and Haibing Guan},
+  title     = {{gScale}: Scaling up {GPU} Virtualization with Dynamic Sharing of Graphics Memory Space},
+  booktitle = {Proceedings of the {USENIX} Annual Technical Conference ({ATC})},
+  pages     = {579--590},
+  publisher = {{USENIX} Association},
+  year      = {2016}
+}
+
+% USENIX page atc22/presentation/zhang-wei.
+@inproceedings{pilotfish2022,
+  author    = {Wei Zhang and Binghao Chen and Zhenhua Han and Quan Chen and Peng Cheng and Fan Yang and Ran Shu and Yuqing Yang and Minyi Guo},
+  title     = {{PilotFish}: Harvesting Free Cycles of Cloud Gaming with Deep Learning Training},
+  booktitle = {Proceedings of the {USENIX} Annual Technical Conference ({ATC})},
+  pages     = {217--232},
+  publisher = {{USENIX} Association},
+  year      = {2022}
+}
+
+% USENIX page nsdi22/presentation/xu.
+@inproceedings{swarmmap2022,
+  author    = {Jingao Xu and Hao Cao and Zheng Yang and Longfei Shangguan and Jialin Zhang and Xiaowu He and Yunhao Liu},
+  title     = {{SwarmMap}: Scaling Up Real-time Collaborative Visual {SLAM} at the Edge},
+  booktitle = {Proceedings of the 19th {USENIX} Symposium on Networked Systems Design and Implementation ({NSDI})},
+  pages     = {977--993},
+  publisher = {{USENIX} Association},
+  year      = {2022}
+}
+
+% ---------------------------------------------------------------- 3DGS systems
+
+% Crossref DOI 10.1145/3620666.3651385.
+@inproceedings{gscore2024,
+  author    = {Junseo Lee and Seokwon Lee and Jungi Lee and Junyong Park and Jaewoong Sim},
+  title     = {{GSCore}: Efficient Radiance Field Rendering via Architectural Support for {3D} {Gaussian} Splatting},
+  booktitle = {Proceedings of the 29th {ACM} International Conference on Architectural Support for Programming Languages and Operating Systems ({ASPLOS}), Volume 3},
+  pages     = {497--511},
+  publisher = {{ACM}},
+  year      = {2024},
+  doi       = {10.1145/3620666.3651385}
+}
+
+% arXiv 2611.02365 comment: "Accepted by MICRO 2026".
+@inproceedings{scarf2026,
+  author    = {Zirui Ma and Zhihua Fan and Haibin Wu and Wenxing Li and Fulin Zhang and Dongrui Fan and Xiaochun Ye and Wenming Li},
+  title     = {{SCARF}: A Scene-Adaptive Depth-Guided {G-3DGS} Encoder Accelerator with Semantic Reuse and Fused Dataflow},
+  booktitle = {{IEEE/ACM} International Symposium on Microarchitecture ({MICRO})},
+  year      = {2026},
+  note      = {arXiv:2611.02365}
+}
+
+% ---------------------------------------------------------------- 3DGS and volumetric streaming
+
+% Crossref DOI 10.1145/3636534.3649364.
+@inproceedings{muv2_2024,
+  author    = {Yu Liu and Puqi Zhou and Zejun Zhang and Anlan Zhang and Bo Han and Zhenhua Li and Feng Qian},
+  title     = {{MuV2}: Scaling up Multi-user Mobile Volumetric Video Streaming via Content Hybridization and Sharing},
+  booktitle = {Proceedings of the 30th Annual International Conference on Mobile Computing and Networking ({MobiCom})},
+  pages     = {327--341},
+  publisher = {{ACM}},
+  year      = {2024},
+  doi       = {10.1145/3636534.3649364}
+}
+
+% arXiv 2504.05517; Crossref DOI 10.1145/3680207.3723485.
+@inproceedings{l3gs2025,
+  author    = {Yi-Zhen Tsai and Xuechen Zhang and Zheng Li and Jiasi Chen},
+  title     = {{L3GS}: Layered {3D} {Gaussian} Splats for Efficient {3D} Scene Delivery},
+  booktitle = {Proceedings of the 31st Annual International Conference on Mobile Computing and Networking ({MobiCom})},
+  pages     = {453--467},
+  publisher = {{ACM}},
+  year      = {2025},
+  doi       = {10.1145/3680207.3723485}
+}
+
+% Crossref DOI 10.1145/3712676.3714445.
+@inproceedings{lts2025,
+  author    = {Yuan-Chun Sun and Yuang Shi and Cheng-Tse Lee and Mufeng Zhu and Wei Tsang Ooi and Yao Liu and Chun-Ying Huang and Cheng-Hsin Hsu},
+  title     = {{LTS}: A {DASH} Streaming System for Dynamic Multi-Layer {3D} {Gaussian} Splatting Scenes},
+  booktitle = {Proceedings of the 16th {ACM} Multimedia Systems Conference ({MMSys})},
+  pages     = {136--147},
+  publisher = {{ACM}},
+  year      = {2025},
+  doi       = {10.1145/3712676.3714445}
+}
+
+% arXiv 2604.02851 v2 (2026-11-05); v1 was titled "Streaming Real-Time Rendered Scenes as 3D Gaussians" with two authors.
+@misc{siekkinen2026,
+  author       = {Matti Siekkinen and Teemu K{\"a}m{\"a}r{\"a}inen and Ahmad Alhilal},
+  title        = {Streaming Persistent {3D} {Gaussian} Proxies for View-Flexible Remote Rendering},
+  howpublished = {arXiv:2604.02851},
+  year         = {2026}
+}
+
+% Crossref DOI 10.1145/3767308.3835220; arXiv 2602.03207 (v1 carries an earlier title and six authors).
+@inproceedings{websplatter2026,
+  author    = {Yudong Han and Chao Xu and Xiaodan Ye and Weichen Bi and Xuanhuai Xu and Zilong Dong and Yun Ma},
+  title     = {{WebSplatter}: Efficient and Faithful In-Browser {3D} {Gaussian} Splatting across Devices via {WebGPU}},
+  booktitle = {Proceedings of the 34th {ACM} International Conference on Multimedia ({MM})},
+  pages     = {2825--2834},
+  publisher = {{ACM}},
+  year      = {2026},
+  doi       = {10.1145/3767308.3835220}
+}
+
+% arXiv 2609.18624 comment: "Accepted at IEEE MMSP 2026".
+@inproceedings{moqsplat2026,
+  author    = {Emanuele Artioli and Mohammadreza Ghafari and Md Tariqul Islam and Farzad Tashtarian and Christian Rothenberg and Christian Timmerer},
+  title     = {{MoQSplat}: Adaptive Progressive Streaming of {3D} {Gaussian} Splatting via {MoQ}},
+  booktitle = {{IEEE} International Workshop on Multimedia Signal Processing ({MMSP})},
+  year      = {2026},
+  note      = {arXiv:2609.18624}
+}
+
+% Crossref DOI 10.1145/3793853.3795764.
+@inproceedings{lmg2026,
+  author    = {Yuan-Chun Sun and Guodong Chen and Sam Ziaie Kondori and Mallesham Dasari and Cheng-Hsin Hsu},
+  title     = {{LMG}: Efficient Streaming of Layered Mesh-{Gaussian} {3D} Scenes},
+  booktitle = {Proceedings of the {ACM} Multimedia Systems Conference ({MMSys})},
+  pages     = {264--275},
+  publisher = {{ACM}},
+  year      = {2026},
+  doi       = {10.1145/3793853.3795764}
+}
+
+% arXiv 2609.13859; no venue stated.
+@misc{gaussanything2026,
+  author       = {Dmitrii Maliukov and Timofei Kozlov and Dmitrii Plotnikov and Miguel {Altamirano Cabrera} and Dzmitry Tsetserukou},
+  title        = {{GaussAnything}: Semantic Intent-Driven Refinement of Evolving {Gaussian} Scenes for Standalone {VR}},
+  howpublished = {arXiv:2609.13859},
+  year         = {2026}
+}
+
+% arXiv 2606.17212; no venue stated.
+@misc{partialgs2026,
+  author       = {Faruk Alpay and Levent Sarioglu and Yaser Hadri},
+  title        = {Renderable Partial Representations for Dynamic {Gaussian} Splatting under Incomplete Delivery},
+  howpublished = {arXiv:2606.17212},
+  year         = {2026}
+}
