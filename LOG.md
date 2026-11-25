@@ -1143,6 +1143,52 @@ The configuration carried forward is `fast` plus `--depth-bf16`.
 
 ---
 
+## G17 - A fresh public clone set up by reproduce.sh fetched and verified every file and rebuilt the StreamSplat image with identical packages, but the TeX image failed on a CTAN mirror, so smoke and report never ran
+
+**Question.**
+Does a fresh clone of the public repository, set up only by `reproduce.sh`, give the published numbers?
+Plan `misty-painting-summit`, public-release version, approved in plan mode on 2026-11-25.
+
+**Setup.**
+- Lane: quotable verification (the README cites it); registration in the runner header, committed before the run (0784830).
+- The runner clones github.com/kylevirtuous1211/virtualization_final_project at e344823 into `outputs/reproduce/G17/clone` and runs, inside it, `STREAMSPLAT_IMAGE=streamsplat:g17 TEXLIVE_IMAGE=texlive-report:g17 DOCKER_BUILD_ARGS="--no-cache --pull" ./reproduce.sh setup build smoke report`.
+- Controls: G16's step 0 (11.64 and 15.71 updates/s, ratio 1.350); G8's per-window PSNR and depth maps; the committed `main.pdf`.
+- Known before the run: `reproduce.sh setup` on this machine (every file verified) and a smoke run on this machine with the existing image (PASS; a development test, not a result).
+- Run 2026-11-25 14:30:30-14:50:00Z; setup 718 s, build 452 s.
+
+**Command.**
+```
+bash experiments/reproduce/run_G17_fresh-clone-smoke.sh e344823a12c673b88b13864fdca0b0cc013b10de
+cat outputs/reproduce/G17/steps.txt; grep -E '^(ok|fetching)' outputs/reproduce/G17/setup.log; grep -n 'cannot download' outputs/reproduce/G17/build.log
+for i in 5d686e9 g17; do docker run --rm --network none --entrypoint cat streamsplat:$i /opt/freeze.txt > /tmp/freeze_$i.txt; done; diff /tmp/freeze_5d686e9.txt /tmp/freeze_g17.txt   # by hand, after the run
+```
+
+**Result.**
+- `setup` exited 0. It cloned StreamSplat at 5d686e9 and fetched `streamsplat.safetensors` (Google Drive), `depth_anything_v2_vitl.pth` (Hugging Face), `kitti360.mp4` and the DAVIS zip afresh; every sha256 matched. The three torch hub weights were already in `~/.cache/torch` and were verified there.
+- `build` exited 1. The StreamSplat image built first with `--no-cache --pull` (`streamsplat:g17`, sha256:5974afed6a09), and its `/opt/freeze.txt` equals the G16 image's in all 154 packages (checked by hand after the run).
+- The TeX image then failed: `tlmgr install sttools breakurl` could not download `texlive.tlpdb.sha512` from the CTAN mirror `ctan.mirror.twds.com.tw`.
+- Two `--no-cache` rebuilds of the same Dockerfile, minutes later, succeeded, so the mirror failure was transient. A reproduction step that needs a live CTAN mirror is still fragile, and it will break for good once TeX Live 2026 is frozen.
+- `smoke`, `report`, the torch hub URL check and `metrics.json` did not run, because the runner stops on a failed build.
+
+**Against the predictions registered in the runner header.**
+- P1 every download matches its sha256, StreamSplat at 5d686e9, no login: **holds** for everything this run fetched; the torch hub URLs were not tested by the run.
+- P2 the `--no-cache --pull` build succeeds and the freeze differs at most in jaxtyping: **refuted** by the TeX image; the StreamSplat image's freeze is identical.
+- P3-P5: not tested.
+
+**Cost.**
+20 min wall clock, no GPU time, about 2.9 GB downloaded; the lab's own machine, no charge.
+
+**Fix.**
+208f59f ships `flushend.sty` and `breakurl.sty` (LPPL) beside the report, and the TeX Dockerfile is the pinned base image alone, so the build downloads nothing from CTAN.
+With that image the report rebuilds byte-identical to the committed PDF.
+G18 reruns this registration unchanged on the fixed commit.
+
+**What it overturns.**
+- No measured number.
+- Correction found while building `results/tables.md`: G13's "1.02x at batch 4" (its title and table) is 1.01x. The ratio of the means is 11.205 / 11.04 = 1.0147, as G13's own "+1.5%" says. The report's Table 3 gives 1.01.
+
+---
+
 ## Refuted claims
 
 | Claim | Refuted by | Note |
@@ -1166,3 +1212,5 @@ The configuration carried forward is `fast` plus `--depth-bf16`.
 | The CUDA graphs hold about 2 GB more VRAM in bf16 (G14 P2) | G14 | 0.2-0.5 GB at batch 1; 4.2 GB at batch 4, with graphs for batch sizes 1 to 4. |
 | The fast StreamSplat server runs 7-9 updates/s back to back and serves 6 (5-8) users at 1 Hz, at 0.11-0.16 s p95 with 4 users (G15 estimates) | G15 | 11.53 updates/s, 10 users (11 not run), 0.090 s; all beyond the estimates in the favourable direction, no registered refutation criterion met. |
 | The 1 Hz capacity is the largest N below the server's back-to-back throughput (G15's reading; G16 P6) | G16 | `fast` fails at 11 below its 11.64 updates/s (57/60 updates, p95 3.6 s) and `depthbf16` passes 15 below 15.71 in 1 of 2 repeats: capacity 10 and 14, one grid step below the rule in both arms, inside P6's tolerance; N passed up to about 0.89 of the rate. |
+| `reproduce.sh` builds both images from a fresh public clone (G17 P2) | G17 | The TeX image's `tlmgr install` failed on a CTAN mirror; 208f59f ships the two `.sty` files instead; rerun as G18. |
+| Removing the host waits gives 1.02x at batch 4 (G13 title and table) | G17 | A rounding error: the ratio of the means is 1.0147, so 1.01x, as G13's "+1.5%" says. |
