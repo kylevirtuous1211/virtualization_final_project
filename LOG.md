@@ -1189,6 +1189,54 @@ G18 reruns this registration unchanged on the fixed commit.
 
 ---
 
+## G18 - From a fresh clone of the public repository, reproduce.sh gives G16's throughput within 3.0%, G8's quality windows bitwise, and the report byte for byte
+
+**Question.**
+G17's question, rerun after 208f59f removed the TeX build's CTAN download: does a fresh clone of the public repository, set up only by `reproduce.sh`, give the published numbers?
+
+**Setup.**
+- Lane: quotable verification; G17's registration unchanged, in the runner header (236120d), committed and pushed before the run.
+- The runner clones github.com/kylevirtuous1211/virtualization_final_project at 236120d into `outputs/reproduce/G18/clone` and runs `STREAMSPLAT_IMAGE=streamsplat:g18 TEXLIVE_IMAGE=texlive-report:g18 DOCKER_BUILD_ARGS="--no-cache --pull" ./reproduce.sh setup build smoke report` inside it.
+- `smoke` is G16's step 0 for `fast` and `depthbf16` (2 runs each, 20 updates after 3 warm-ups), then G8's full-precision depth maps and evaluation on the 2 shortest val sequences, car-shadow and judo.
+- Known before the run: G17, and a PASS of `smoke` on this machine with the existing image (a development test).
+- Run 2026-11-25 14:53:49-15:18:46Z on the RTX 6000 Ada, driver 595.91.07; images streamsplat:g18 sha256:e669696b5faf and texlive-report:g18 sha256:f534be1e15b6.
+
+**Command.**
+```
+bash experiments/reproduce/run_G18_fresh-clone-smoke-rerun.sh 236120d7b06ec11f0d6251682fe34ed1a2a9ce33
+python3 -c 'import json; m=json.load(open("outputs/reproduce/G18/metrics.json")); print(m["steps"], m["predictions_hold"]); print(m["smoke"]["throughput"], m["smoke"]["ratio"], m["smoke"]["quality"]); print(m["depth_maps"], m["pdf"], m["freeze_differs"])'
+```
+
+**Result.**
+- Every step exited 0: setup 698 s (4 files fetched afresh, every sha256 matched), build 470 s, smoke 324 s, report 5 s.
+- The three torch hub URLs, downloaded again into `hub_check`, match their sha256.
+- The new StreamSplat image's `/opt/freeze.txt` equals the G16 image's in every package.
+
+| | G18 (fresh clone) | Published (G16) | Change |
+|---|---|---|---|
+| `fast` back to back, updates/s | 11.29 | 11.64 | -3.0% |
+| `depthbf16` back to back, updates/s | 15.25 | 15.71 | -2.9% |
+| ratio | 1.351 | 1.350 | +0.1% |
+
+- Quality: all 64 windows of car-shadow and judo equal G8's bitwise (largest change 0.0 dB), and all 74 fp32 depth maps of the two sequences equal G8's byte for byte (40 and 34).
+- The report rebuilt from `results/` equals the committed `main.pdf` byte for byte, so its text is equal too.
+
+**Against the predictions registered in the runner header.**
+- P1 downloads match, StreamSplat at 5d686e9, no login: **holds**.
+- P2 the `--no-cache --pull` build succeeds, freeze differs at most in jaxtyping: **holds** (no difference at all).
+- P3 each arm within 5% of G16 and the ratio within 5% of 1.350: **holds** (-3.0%, -2.9%, +0.1%).
+- P4 the shortest sequence's depth maps byte-equal to G8's and the windows bitwise equal: **holds**, for both sequences.
+- P5 the rebuilt PDF has the committed PDF's text: **holds**, byte for byte.
+
+**Cost.**
+25 min wall clock, about 5 GPU minutes, about 2.9 GB downloaded; the lab's own machine, no charge.
+
+**What it overturns.**
+- G17's refuted P2 (the TeX image failed on a CTAN mirror): with 208f59f both images build from a fresh clone.
+- No measured number is overturned. Both arms ran about 3% below G16, inside the drift between experiments that the report already states (about 7% for `fast` at saturation between G15 and G16); the ratio, the comparison the report rests on, matches to 0.1%.
+
+---
+
 ## Refuted claims
 
 | Claim | Refuted by | Note |
