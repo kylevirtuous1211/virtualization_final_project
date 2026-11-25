@@ -53,6 +53,7 @@ You need Linux, an NVIDIA GPU, Docker with the NVIDIA Container Toolkit, git, cu
 ./reproduce.sh report       # redraw the figures and rebuild the PDF from results/
 ```
 
+- Verified from a fresh clone of this repository on 2026-11-25 (`LOG.md` G18): every download matched, both images built, `smoke` passed (throughput 3.0% and 2.9% below G16, quality windows bitwise equal to G8), and `report` rebuilt the PDF byte for byte.
 - `report` uses the images from `build` but no GPU, and it rebuilds the committed PDF byte for byte.
 - `experiments` needs a GPU that nothing else uses: the runners redo any run that another process touched.
 - The numbers come from an RTX 6000 Ada. On another GPU, a gate registered for that GPU (G9, G15, G16) may stop a runner; `LOG.md` gives each gate.
