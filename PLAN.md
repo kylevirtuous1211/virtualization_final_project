@@ -356,7 +356,7 @@ M3 用 240 fps 攝影機驗證這個程式量測；真正的 glass-to-glass 延�
 - `~/Desktop/GS_playground/envs/puffin-world-c6d9ae5-py310-cu126`：有 torch 2.7、gsplat 1.5.3、websockets、aiohttp、cv2、plyfile，可以當 Server、序列產生器和參考渲染的環境。
 - `~/Desktop/GS_playground/src/gs_playground/gs/ply.py`、`render.py`：PLY 讀寫和取子集，以及 gsplat 渲染包裝。
 - `~/Desktop/fmri3d-viewer/scripts/wz2_browser_probe.py`：只用標準函式庫的 Chrome DevTools Protocol client，可以當 runner 和 CPU 降速的基礎。
-- `/mnt/nchc-2603056/datasets/ScanNet++_3dgs/*/point_cloud.ply`：6 個靜態場景，每個 52.7 萬到 79.4 萬顆 Gaussian。
+- `<nchc-mount>/datasets/ScanNet++_3dgs/*/point_cloud.ply`：6 個靜態場景，每個 52.7 萬到 79.4 萬顆 Gaussian。
   先複製到本機，因為 N: 很慢。
 - `~/Desktop/PairGS_ours/viewer/vendor/` 裡的 Spark 2.1.0：WebGL2 的備案，它的 `scene.ply` symlink 已斷，要重新連。
 - M8 用：`~/Desktop/event_camera_2DGS/envs/anysplat` 和本機的權重。

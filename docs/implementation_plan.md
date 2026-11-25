@@ -19,14 +19,14 @@ ACAO（Access-Control-Allow-Origin）是允許跨來源 `fetch` 讀取回應內�
 
 ### 0.1 機器盤點後和 PLAN.md 不同的地方
 
-這些是 2026-10-27 實際檢查這台工作站（t-3dgs-02-linux）的結果，PLAN.md 寫作時沒有這些資訊。
+這些是 2026-10-27 實際檢查這台工作站的結果，PLAN.md 寫作時沒有這些資訊。
 
 1. 這台機器沒有 display :20，也沒有 Chrome Remote Desktop；:0 是 root 的 LightDM 登入畫面，這個使用者拿不到授權。
    所以 M0 在本機只能用 `--headless=new` 搭配 NVIDIA Vulkan 驅動跑 WebGPU（第 2.3 節），它的 `requestAnimationFrame` 可能是計時器驅動而不是真的 vsync，所有數字都要標 `vsync_mode=headless_timer`。
    「幀間隔在 GPU 負載下會不會變長」在這種模式下是一個未驗證的假設，所以 V4 是一個正控制（positive control）：先確認這個儀器在已知會卡的負載下真的量得到卡，才能拿它去量別的東西。
    真正 vsync 的數字要等有人在主機登入桌面（:0 變成 xfce session）或用 Windows 那台。
 2. 系統沒有 Chrome；唯一能用 GPU 的瀏覽器是 Playwright 裝的 Chrome for Testing 153.0.8010.12，路徑 `~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome`。
-   它屬於另一個專案（`demo-assessment-system/.venv`）的 Playwright，不能刪那個 venv。
+   它屬於另一個專案的 Playwright，不能刪那個 venv。
    Ubuntu 24.04 的 AppArmor 擋住非特權 user namespace，所以必須加 `--no-sandbox`。
 3. Docker 29.7.1 加 nvidia-container-toolkit 可以用（使用者在 docker 群組，但要用 `sg docker -c '...'`）。
    PLAN.md 第 4.3 節和 11.8 節說「沒有 Docker」是錯的，這給 M4 一條不需要 sudo 的 `tc` 路線（第 9.4 節）。
@@ -35,7 +35,7 @@ ACAO（Access-Control-Allow-Origin）是允許跨來源 `fetch` 讀取回應內�
    N 曲線的四個點改用本機已有的 Mip-NeRF 360 garden（gsplat 訓練，6,606,688 顆，標準 INRIA 格式）取子集，ScanNet++ `0d2ee665be` 另成一條兩點的曲線，第 3 節說明。
 6. WebSplatter 本機 clone 的 HEAD 是 `16bb06e`，來自 GitHub；`reading_notes.md:2095` 說 GitHub 上找不到的是 Zenodo 記錄的 `beb9532`，不是 `16bb06e`。
    PINS.tsv 釘 `16bb06e`，另外在 repo 裡存一份 git bundle 當備援（第 1.4 節）。
-7. Windows 那台（172.16.10.104）不回 ping，但 ARP 表看得到它在線上；M0 在那台的量測是可選項，能連上才做。
+7. Windows 那台不回 ping，但 ARP 表看得到它在線上；M0 在那台的量測是可選項，能連上才做。
 8. 工作站 GPU 現在被別人的程序用著（72% 使用率）；PLAN 第 8.4 節的剔除規則從第一個 run 就生效，而且要在 run 進行中持續取樣，不能只在啟動前看一眼（第 6.4 節）。
 
 ### 0.2 這份文件對 PLAN.md 做的具體化和偏離（每一條都需要你知道）
@@ -390,7 +390,7 @@ navigator.gpu.requestAdapter({powerPreference:'high-performance'}).then(a => JSO
 5. 成功條件（V1）：`vendor == "nvidia"` 且 `gpu.featureStatus` 裡 WebGPU 那一項是硬體加速（Chrome 對這個鍵的確切拼法以 V1 實際回傳為準，V1 的 LOG 條目會把它抄下來）。
 
 有真正螢幕的路線（之後需要時）：有人在主機登入 xfce 後，去掉 `--headless=new` 和 `--disable-vulkan-surface`，加 `DISPLAY=:0`，stamp 記 `vsync_mode=display`。
-Windows 那台：在它上面手動啟動 `chrome.exe --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0 --enable-unsafe-webgpu --enable-webgpu-developer-features`，runner 用 `--cdp-url http://172.16.10.104:9222` 接上去而不自己啟動；資料和 Server 仍在工作站。
+Windows 那台：在它上面手動啟動 `chrome.exe --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0 --enable-unsafe-webgpu --enable-webgpu-developer-features`，runner 用 `--cdp-url http://<windows-host>:9222` 接上去而不自己啟動；資料和 Server 仍在工作站。
 
 ### 2.4 一次性檢查
 
@@ -1281,7 +1281,7 @@ V1 的事先宣告已經寫在第 7 節的 runner 檔頭裡，那就是跑之前
 ```markdown
 ## V1 - <跑的日期> - Linux Chrome 153 的 WebGPU 跑在 NVIDIA 上嗎 [explore]
 - Study: experiments/m0_static_null  Runner: run_V1_gpucheck.sh（檔頭有事先宣告，commit <sha>）
-- 問題: 這台工作站（t-3dgs-02-linux）的 Playwright Chrome 153.0.8010.12 以 --headless=new 加 Vulkan 啟動時，WebGPU adapter 是 NVIDIA RTX 6000 Ada 還是 SwiftShader？
+- 問題: 這台工作站的 Playwright Chrome 153.0.8010.12 以 --headless=new 加 Vulkan 啟動時，WebGPU adapter 是 NVIDIA RTX 6000 Ada 還是 SwiftShader？
 - 成功條件（引用 runner 檔頭）: adapter.vendor == "nvidia" 且 SystemInfo.getInfo 的 featureStatus 說 WebGPU 是硬體加速。
 - 預測（引用 runner 檔頭）: 會是 nvidia。
 - 指令: source tools/setup/env.sh && experiments/m0_static_null/run_V1_gpucheck.sh

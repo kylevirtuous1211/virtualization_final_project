@@ -787,20 +787,20 @@ Exit criterion:
 ### Reuse
 
 Local, already on disk (no installs):
-- /home/intern_2603056/Desktop/GS_playground/envs/puffin-world-c6d9ae5-py310-cu126: torch 2.7, gsplat 1.5.3, websockets, aiohttp, cv2 and plyfile.
+- ~/Desktop/GS_playground/envs/puffin-world-c6d9ae5-py310-cu126: torch 2.7, gsplat 1.5.3, websockets, aiohttp, cv2 and plyfile.
   Covers the server, the trace producer and reference renders.
-- /home/intern_2603056/Desktop/GS_playground/src/gs_playground/gs/ply.py and render.py: PLY load/save with subsets, and a gsplat render wrapper.
+- ~/Desktop/GS_playground/src/gs_playground/gs/ply.py and render.py: PLY load/save with subsets, and a gsplat render wrapper.
   Used for traces, the SH0 cost check and the PSNR guardrail.
-- /home/intern_2603056/Desktop/fmri3d-viewer/scripts/wz2_browser_probe.py: a stdlib Chrome DevTools Protocol client.
+- ~/Desktop/fmri3d-viewer/scripts/wz2_browser_probe.py: a stdlib Chrome DevTools Protocol client.
   It is the base for the runner and for CPU throttling.
-- /home/intern_2603056/Desktop/PairGS_ours/scripts/serve_demo.py: a stdlib server skeleton.
+- ~/Desktop/PairGS_ours/scripts/serve_demo.py: a stdlib server skeleton.
   It has no WebSocket, so that layer has to be added.
-- /mnt/nchc-2603056/datasets/ScanNet++_3dgs/*/point_cloud.ply: 6 static scenes, 527k-794k Gaussians each.
+- <nchc-mount>/datasets/ScanNet++_3dgs/*/point_cloud.ply: 6 static scenes, 527k-794k Gaussians each.
   Copy them to local disk first, because the CIFS mount is slow.
-- Spark 2.1.0, vendored in /home/intern_2603056/Desktop/PairGS_ours/viewer/vendor/: the WebGL2 fallback.
+- Spark 2.1.0, vendored in ~/Desktop/PairGS_ours/viewer/vendor/: the WebGL2 fallback.
   Its scene.ply symlinks are dangling and must be relinked.
-- Prior art for the cache, in /home/intern_2603056/Desktop/archive/EviPartGS/web_viewer/node_modules: the SplatPager .d.ts files.
-- For M8: the AnySplat env (/home/intern_2603056/Desktop/event_camera_2DGS/envs/anysplat) with its local weights.
+- Prior art for the cache, in ~/Desktop/archive/EviPartGS/web_viewer/node_modules: the SplatPager .d.ts files.
+- For M8: the AnySplat env (~/Desktop/event_camera_2DGS/envs/anysplat) with its local weights.
 
 External (each needs the user's approval as a dependency):
 - WebSplatter, MIT licence, HEAD 16bb06e (Zenodo 21798977).
