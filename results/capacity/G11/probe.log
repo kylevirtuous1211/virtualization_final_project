@@ -13,11 +13,11 @@ https://developer.nvidia.com/ngc/nvidia-deep-learning-container-license
 
 A copy of this license is made available in this container at /NGC-DL-CONTAINER-LICENSE for your convenience.
 
-/home/intern_2603056/Desktop/virtualization_final_project/third_party/StreamSplat/encoders/dinov2/layers/swiglu_ffn.py:43: UserWarning: xFormers is available (SwiGLU)
+<repo>/third_party/StreamSplat/encoders/dinov2/layers/swiglu_ffn.py:43: UserWarning: xFormers is available (SwiGLU)
   warnings.warn("xFormers is available (SwiGLU)")
-/home/intern_2603056/Desktop/virtualization_final_project/third_party/StreamSplat/encoders/dinov2/layers/attention.py:27: UserWarning: xFormers is available (Attention)
+<repo>/third_party/StreamSplat/encoders/dinov2/layers/attention.py:27: UserWarning: xFormers is available (Attention)
   warnings.warn("xFormers is available (Attention)")
-/home/intern_2603056/Desktop/virtualization_final_project/third_party/StreamSplat/encoders/dinov2/layers/block.py:39: UserWarning: xFormers is available (Block)
+<repo>/third_party/StreamSplat/encoders/dinov2/layers/block.py:39: UserWarning: xFormers is available (Block)
   warnings.warn("xFormers is available (Block)")
 premise holds: all 64 clip frames span exactly 0..255
 matmul precision highest, cudnn TF32 False

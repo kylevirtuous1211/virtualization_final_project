@@ -45,7 +45,9 @@ def copy_sources():
             relative = str(source.relative_to(REPO))
             target = destination(relative)
             target.parent.mkdir(parents=True, exist_ok=True)
-            if relative in DROP_KEYS:
+            if source.suffix == ".log":  # logs quote absolute paths of the machine that ran them
+                target.write_text(source.read_text().replace(str(REPO), "<repo>"))
+            elif relative in DROP_KEYS:
                 data = json.loads(source.read_text())
                 data.pop(DROP_KEYS[relative], None)
                 target.write_text(json.dumps(data, indent=1) + "\n")

@@ -1,0 +1,33 @@
+{
+ "n": 1,
+ "k": 4,
+ "period": 0.0,
+ "mps": false,
+ "slo": 1.0,
+ "expected": 20,
+ "all_meet_slo": false,
+ "users": [
+  {
+   "rank": 0,
+   "pid": 638833,
+   "rc": 0,
+   "oom": false,
+   "updates": 20,
+   "expected": 20,
+   "lat_p50": 1.9246256351470947,
+   "lat_p95": 3.659524917602539,
+   "svc_p50": 0.19184303283691406,
+   "svc_p95": 0.19463253021240234,
+   "gaussians_p50": 499157,
+   "weight_bytes": 2944721308,
+   "peak_alloc": 5039954944,
+   "meets_slo": false
+  }
+ ],
+ "proc_vram_mib_max": {
+  "638833": 5964
+ },
+ "foreign_procs": [],
+ "gpu_util_mean": 67.4,
+ "gpu_mem_mib_max": 6004
+}

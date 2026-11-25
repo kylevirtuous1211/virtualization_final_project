@@ -1,0 +1,51 @@
+{
+ "n": 2,
+ "k": 8,
+ "period": 1.0,
+ "mps": true,
+ "slo": 1.0,
+ "expected": 60,
+ "all_meet_slo": true,
+ "users": [
+  {
+   "rank": 0,
+   "pid": 679439,
+   "rc": 0,
+   "oom": false,
+   "updates": 60,
+   "expected": 60,
+   "lat_p50": 0.39678287506103516,
+   "lat_p95": 0.40458178520202637,
+   "svc_p50": 0.39612436294555664,
+   "svc_p95": 0.4038584232330322,
+   "gaussians_p50": 942675,
+   "weight_bytes": 2944721308,
+   "peak_alloc": 7121140736,
+   "meets_slo": true
+  },
+  {
+   "rank": 1,
+   "pid": 679440,
+   "rc": 0,
+   "oom": false,
+   "updates": 60,
+   "expected": 60,
+   "lat_p50": 0.4009087085723877,
+   "lat_p95": 0.4060535430908203,
+   "svc_p50": 0.40021276473999023,
+   "svc_p95": 0.405364990234375,
+   "gaussians_p50": 942675,
+   "weight_bytes": 2944721308,
+   "peak_alloc": 7121140736,
+   "meets_slo": true
+  }
+ ],
+ "proc_vram_mib_max": {
+  "679593": 30,
+  "679439": 8660,
+  "679440": 9150
+ },
+ "foreign_procs": [],
+ "gpu_util_mean": 95.27868852459017,
+ "gpu_mem_mib_max": 15500
+}
