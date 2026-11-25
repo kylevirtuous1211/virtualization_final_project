@@ -1,5 +1,5 @@
 """Copy the numbers the progress report quotes from the untracked run outputs into the tracked results/,
-and build results/tables.md, the report's four tables computed from those files.
+and build results/tables.md, the report's data tables (Tables 2-5) computed from those files.
 
 Usage: python3 results/collect.py
 It reads outputs/ and runs/ under the repository root. A source that does not exist leaves the tracked
@@ -99,7 +99,7 @@ def table_sharing():
             ("AnySplat, k=2", "2/s", sweep_points(load("capacity/G3/metrics.json"))),
             ("StreamSplat", "1/s", sweep_points(load("capacity/G6/metrics.json"))),
             ("StreamSplat", "3/s", sweep_points(load("capacity/G7/metrics.json")))]
-    lines = ["## Table 1: users served under time-slicing (TS) and MPS",
+    lines = ["## Table 2: users served under time-slicing (TS) and MPS",
              "", "| Model | Rate | Users TS | Users MPS | Saturated updates/s TS | Saturated updates/s MPS |", "|---|---|---|---|---|---|"]
     for model, rate, points in rows:
         lines.append(f"| {model} | {rate} | {capacity(points['ts'])} | {capacity(points['mps'])} | "
@@ -113,7 +113,7 @@ def table_sharing():
 def table_ablation():
     steps = [("Feature cache", "G11", "nocache", "cache"), ("bf16 model", "G12", "tf32", "bf16"),
              ("No host waits", "G13", "sync", "nosync"), ("CUDA graphs", "G14", "eager", "graphs")]
-    lines = ["## Table 2: each optimization against its matched control",
+    lines = ["## Table 3: each optimization against its matched control",
              "", "| Optimization | Updates/s b=1 | Speedup b=1 | Speedup b=4 | Memory (MiB) | Keyframe PSNR (dB) |",
              "|---|---|---|---|---|---|"]
     for label, entry, control, treated in steps:
@@ -147,7 +147,7 @@ def table_capacity():
     back_to_back = {"Serial": [g15["step0_updates_per_s"]["serial"]],
                     "Opt": [g15["step0_updates_per_s"]["fast"], g16["derived"]["step0"]["fast"]["mean_updates_per_s"]],
                     "Opt+DepthBF16": [g16["derived"]["step0"]["depthbf16"]["mean_updates_per_s"]]}
-    lines = ["## Table 3: capacity at one keyframe per user per second",
+    lines = ["## Table 4: capacity at one keyframe per user per second",
              "", "| Configuration | Back to back (updates/s) | Capacity (users) | p95 at capacity (s) | Memory total (MiB) | Memory per user (MiB) |",
              "|---|---|---|---|---|---|"]
     for name, sweep_list in sweeps.items():
@@ -166,7 +166,7 @@ def table_quality():
     rows = [("Full precision", full, None),
             ("bf16 model", load("capacity/G12/davis/metrics.json")["val"], load("capacity/G12/davis/metrics.json")["against_G8"]),
             ("bf16 model and depth", load("capacity/G16/davis/metrics.json")["val"], load("capacity/G16/davis/metrics.json")["against_G8"])]
-    lines = ["## Table 4: quality on the DAVIS 2017 validation windows (the authors' metric)",
+    lines = ["## Table 5: quality on the DAVIS 2017 validation windows (the authors' metric)",
              "", "| Precision | Keyframes (dB) | Middle (dB) | Keyframes vs full, mean (dB) | Windows losing > 0.5 dB |",
              "|---|---|---|---|---|",
              "| Paper (StreamSplat, reported) | 37.83 | 23.66 | | |"]
