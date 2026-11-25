@@ -1,0 +1,10 @@
+{
+ "sequences": [
+  "car-shadow",
+  "judo"
+ ],
+ "windows": 64,
+ "bitwise_equal_windows": 64,
+ "max_abs_change_dB": 0.0,
+ "fp32_depth_maps_equal_to_G8": "judo"
+}

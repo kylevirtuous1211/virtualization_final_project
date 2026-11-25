@@ -1,0 +1,39 @@
+
+==========
+== CUDA ==
+==========
+
+CUDA Version 12.4.1
+
+Container image Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This container image and its contents are governed by the NVIDIA Deep Learning Container License.
+By pulling and using the container, you accept the terms and conditions of this license:
+https://developer.nvidia.com/ngc/nvidia-deep-learning-container-license
+
+A copy of this license is made available in this container at /NGC-DL-CONTAINER-LICENSE for your convenience.
+
+/home/intern_2603056/Desktop/virtualization_final_project/third_party/StreamSplat/encoders/dinov2/layers/swiglu_ffn.py:43: UserWarning: xFormers is available (SwiGLU)
+  warnings.warn("xFormers is available (SwiGLU)")
+/home/intern_2603056/Desktop/virtualization_final_project/third_party/StreamSplat/encoders/dinov2/layers/attention.py:27: UserWarning: xFormers is available (Attention)
+  warnings.warn("xFormers is available (Attention)")
+/home/intern_2603056/Desktop/virtualization_final_project/third_party/StreamSplat/encoders/dinov2/layers/block.py:39: UserWarning: xFormers is available (Block)
+  warnings.warn("xFormers is available (Block)")
+premise holds: all 64 clip frames span exactly 0..255
+matmul precision highest, cudnn TF32 False
+update 0 rgb: mean abs diff 4.22e-08, max 7.90e-06; mismatched user 3.67e-01; share of values off by > 1e-3: 0.00e+00
+update 0 opacity: mean abs diff 3.97e-06, max 7.67e-04 (not judged)
+update 0 scale: mean abs diff 1.28e-09, max 6.43e-08 (not judged)
+update 0 xyz: mean abs diff 3.48e-08, max 2.26e-06; mismatched user 2.59e-02; share of values off by > 1e-3: 0.00e+00
+update 0 rot: mean abs diff 0.00e+00, max 0.00e+00 (not judged)
+update 1 rgb: mean abs diff 4.21e-08, max 7.72e-06; mismatched user 3.74e-01; share of values off by > 1e-3: 0.00e+00
+update 1 opacity: mean abs diff 3.62e-06, max 9.80e-04 (not judged)
+update 1 scale: mean abs diff 1.28e-09, max 4.51e-08 (not judged)
+update 1 xyz: mean abs diff 3.29e-08, max 1.53e-06; mismatched user 2.26e-02; share of values off by > 1e-3: 0.00e+00
+update 1 rot: mean abs diff 0.00e+00, max 0.00e+00 (not judged)
+update 2 rgb: mean abs diff 4.15e-08, max 8.91e-06; mismatched user 3.80e-01; share of values off by > 1e-3: 0.00e+00
+update 2 opacity: mean abs diff 3.34e-06, max 8.63e-04 (not judged)
+update 2 scale: mean abs diff 1.28e-09, max 3.63e-08 (not judged)
+update 2 xyz: mean abs diff 4.00e-08, max 5.63e-06; mismatched user 2.00e-02; share of values off by > 1e-3: 0.00e+00
+update 2 rot: mean abs diff 0.00e+00, max 0.00e+00 (not judged)
+CACHE_EQUIVALENCE_OK

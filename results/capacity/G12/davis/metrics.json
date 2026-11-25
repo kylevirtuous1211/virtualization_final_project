@@ -1,0 +1,299 @@
+{
+ "val": {
+  "windows": 1849,
+  "sequences": 30,
+  "psnr_given_mean": 37.580761397316884,
+  "psnr_novel_mean": 23.749708965831733,
+  "per_sequence": {
+   "bike-packing": {
+    "windows": 64,
+    "psnr_given_mean": 37.26300686597824,
+    "psnr_given_min": 36.56486511230469,
+    "psnr_given_max": 37.971771240234375,
+    "psnr_novel_mean": 24.528216153383255,
+    "psnr_novel_min": 18.560108184814453,
+    "psnr_novel_max": 31.517940521240234
+   },
+   "blackswan": {
+    "windows": 45,
+    "psnr_given_mean": 37.68874011569553,
+    "psnr_given_min": 37.02322006225586,
+    "psnr_given_max": 38.125648498535156,
+    "psnr_novel_mean": 25.946460511949326,
+    "psnr_novel_min": 22.764202117919922,
+    "psnr_novel_max": 28.3236083984375
+   },
+   "bmx-trees": {
+    "windows": 75,
+    "psnr_given_mean": 37.265197347005206,
+    "psnr_given_min": 35.1173095703125,
+    "psnr_given_max": 39.992713928222656,
+    "psnr_novel_mean": 21.67398546854655,
+    "psnr_novel_min": 17.53750228881836,
+    "psnr_novel_max": 25.52726173400879
+   },
+   "breakdance": {
+    "windows": 79,
+    "psnr_given_mean": 35.5521422277523,
+    "psnr_given_min": 35.181129455566406,
+    "psnr_given_max": 35.891483306884766,
+    "psnr_novel_mean": 21.163386501843416,
+    "psnr_novel_min": 19.186735153198242,
+    "psnr_novel_max": 22.916915893554688
+   },
+   "camel": {
+    "windows": 85,
+    "psnr_given_mean": 35.4845386280733,
+    "psnr_given_min": 34.85003662109375,
+    "psnr_given_max": 36.14149475097656,
+    "psnr_novel_mean": 24.91141503277947,
+    "psnr_novel_min": 20.62395477294922,
+    "psnr_novel_max": 30.012466430664062
+   },
+   "car-roundabout": {
+    "windows": 70,
+    "psnr_given_mean": 35.93340628487723,
+    "psnr_given_min": 35.06218338012695,
+    "psnr_given_max": 36.64653778076172,
+    "psnr_novel_mean": 22.165260750906807,
+    "psnr_novel_min": 17.759361267089844,
+    "psnr_novel_max": 26.08445167541504
+   },
+   "car-shadow": {
+    "windows": 35,
+    "psnr_given_mean": 37.19491631644113,
+    "psnr_given_min": 36.63179016113281,
+    "psnr_given_max": 37.83976364135742,
+    "psnr_novel_mean": 23.53364759172712,
+    "psnr_novel_min": 20.287160873413086,
+    "psnr_novel_max": 27.481199264526367
+   },
+   "cows": {
+    "windows": 99,
+    "psnr_given_mean": 33.800567434291644,
+    "psnr_given_min": 33.60249710083008,
+    "psnr_given_max": 33.988990783691406,
+    "psnr_novel_mean": 25.084087795681423,
+    "psnr_novel_min": 19.98175048828125,
+    "psnr_novel_max": 28.482547760009766
+   },
+   "dance-twirl": {
+    "windows": 85,
+    "psnr_given_mean": 35.991263266170726,
+    "psnr_given_min": 35.007965087890625,
+    "psnr_given_max": 37.29834747314453,
+    "psnr_novel_mean": 20.918421509686638,
+    "psnr_novel_min": 17.890905380249023,
+    "psnr_novel_max": 25.729938507080078
+   },
+   "dog": {
+    "windows": 55,
+    "psnr_given_mean": 39.017891276966445,
+    "psnr_given_min": 36.719139099121094,
+    "psnr_given_max": 41.07479476928711,
+    "psnr_novel_mean": 22.036345533891158,
+    "psnr_novel_min": 19.489477157592773,
+    "psnr_novel_max": 25.447341918945312
+   },
+   "dogs-jump": {
+    "windows": 61,
+    "psnr_given_mean": 41.9149055480957,
+    "psnr_given_min": 40.89888000488281,
+    "psnr_given_max": 42.35588073730469,
+    "psnr_novel_mean": 26.89213493222096,
+    "psnr_novel_min": 23.700340270996094,
+    "psnr_novel_max": 29.772001266479492
+   },
+   "drift-chicane": {
+    "windows": 47,
+    "psnr_given_mean": 38.68837616291452,
+    "psnr_given_min": 38.24836730957031,
+    "psnr_given_max": 38.98808288574219,
+    "psnr_novel_mean": 34.47709331106633,
+    "psnr_novel_min": 32.2564697265625,
+    "psnr_novel_max": 36.1292839050293
+   },
+   "drift-straight": {
+    "windows": 45,
+    "psnr_given_mean": 37.63369471232097,
+    "psnr_given_min": 35.965736389160156,
+    "psnr_given_max": 39.217899322509766,
+    "psnr_novel_mean": 17.0981750064426,
+    "psnr_novel_min": 14.275064468383789,
+    "psnr_novel_max": 20.28700065612793
+   },
+   "goat": {
+    "windows": 85,
+    "psnr_given_mean": 35.510265933766085,
+    "psnr_given_min": 35.08474349975586,
+    "psnr_given_max": 35.88517761230469,
+    "psnr_novel_mean": 19.199796609317556,
+    "psnr_novel_min": 15.937639236450195,
+    "psnr_novel_max": 23.13062286376953
+   },
+   "gold-fish": {
+    "windows": 73,
+    "psnr_given_mean": 37.75659623864579,
+    "psnr_given_min": 37.340972900390625,
+    "psnr_given_max": 38.168460845947266,
+    "psnr_novel_mean": 28.23933679763585,
+    "psnr_novel_min": 26.106529235839844,
+    "psnr_novel_max": 30.084335327148438
+   },
+   "horsejump-high": {
+    "windows": 45,
+    "psnr_given_mean": 35.25157140096029,
+    "psnr_given_min": 34.50459289550781,
+    "psnr_given_max": 36.22663879394531,
+    "psnr_novel_mean": 23.073524051242405,
+    "psnr_novel_min": 19.535167694091797,
+    "psnr_novel_max": 27.674362182617188
+   },
+   "india": {
+    "windows": 76,
+    "psnr_given_mean": 39.896564282869036,
+    "psnr_given_min": 38.516998291015625,
+    "psnr_given_max": 42.75375747680664,
+    "psnr_novel_mean": 22.281422389181035,
+    "psnr_novel_min": 18.125144958496094,
+    "psnr_novel_max": 27.181663513183594
+   },
+   "judo": {
+    "windows": 29,
+    "psnr_given_mean": 39.95851043175007,
+    "psnr_given_min": 39.30560302734375,
+    "psnr_given_max": 40.24271774291992,
+    "psnr_novel_mean": 28.64819362245757,
+    "psnr_novel_min": 23.92281150817871,
+    "psnr_novel_max": 34.07422637939453
+   },
+   "kite-surf": {
+    "windows": 45,
+    "psnr_given_mean": 38.31755498250325,
+    "psnr_given_min": 37.72547912597656,
+    "psnr_given_max": 38.971839904785156,
+    "psnr_novel_mean": 26.01479195488824,
+    "psnr_novel_min": 23.7600040435791,
+    "psnr_novel_max": 27.79062843322754
+   },
+   "lab-coat": {
+    "windows": 42,
+    "psnr_given_mean": 39.20060203188942,
+    "psnr_given_min": 38.63055419921875,
+    "psnr_given_max": 39.9638671875,
+    "psnr_novel_mean": 21.44217014312744,
+    "psnr_novel_min": 16.56103515625,
+    "psnr_novel_max": 26.21925926208496
+   },
+   "libby": {
+    "windows": 44,
+    "psnr_given_mean": 40.583149129694156,
+    "psnr_given_min": 39.40525436401367,
+    "psnr_given_max": 41.26333999633789,
+    "psnr_novel_mean": 23.058634974739768,
+    "psnr_novel_min": 19.432981491088867,
+    "psnr_novel_max": 26.058887481689453
+   },
+   "loading": {
+    "windows": 45,
+    "psnr_given_mean": 36.38668577406141,
+    "psnr_given_min": 35.25883865356445,
+    "psnr_given_max": 37.04960632324219,
+    "psnr_novel_mean": 21.89586592780219,
+    "psnr_novel_min": 16.669761657714844,
+    "psnr_novel_max": 25.87445640563965
+   },
+   "mbike-trick": {
+    "windows": 74,
+    "psnr_given_mean": 40.01235889744114,
+    "psnr_given_min": 39.5446891784668,
+    "psnr_given_max": 40.412689208984375,
+    "psnr_novel_mean": 27.938820349203574,
+    "psnr_novel_min": 19.705209732055664,
+    "psnr_novel_max": 34.31269073486328
+   },
+   "motocross-jump": {
+    "windows": 35,
+    "psnr_given_mean": 39.72085102626256,
+    "psnr_given_min": 36.65385437011719,
+    "psnr_given_max": 42.087181091308594,
+    "psnr_novel_mean": 18.13059171949114,
+    "psnr_novel_min": 12.527061462402344,
+    "psnr_novel_max": 26.361021041870117
+   },
+   "paragliding-launch": {
+    "windows": 75,
+    "psnr_given_mean": 38.164901123046874,
+    "psnr_given_min": 37.06721496582031,
+    "psnr_given_max": 39.044979095458984,
+    "psnr_novel_mean": 28.006184310913085,
+    "psnr_novel_min": 24.8793888092041,
+    "psnr_novel_max": 33.29475402832031
+   },
+   "parkour": {
+    "windows": 95,
+    "psnr_given_mean": 36.98552703857422,
+    "psnr_given_min": 35.81512451171875,
+    "psnr_given_max": 38.182315826416016,
+    "psnr_novel_mean": 22.213349874396073,
+    "psnr_novel_min": 19.06709861755371,
+    "psnr_novel_max": 25.651721954345703
+   },
+   "pigs": {
+    "windows": 74,
+    "psnr_given_mean": 39.74024726249076,
+    "psnr_given_min": 39.13463592529297,
+    "psnr_given_max": 40.54326629638672,
+    "psnr_novel_mean": 28.6864930230218,
+    "psnr_novel_min": 23.071741104125977,
+    "psnr_novel_max": 31.52208709716797
+   },
+   "scooter-black": {
+    "windows": 38,
+    "psnr_given_mean": 34.715702056884766,
+    "psnr_given_min": 34.36652374267578,
+    "psnr_given_max": 35.13848876953125,
+    "psnr_novel_mean": 17.133554182554548,
+    "psnr_novel_min": 13.800188064575195,
+    "psnr_novel_max": 21.83710289001465
+   },
+   "shooting": {
+    "windows": 35,
+    "psnr_given_mean": 40.2168221609933,
+    "psnr_given_min": 38.90794372558594,
+    "psnr_given_max": 42.03866195678711,
+    "psnr_novel_mean": 18.126559448242187,
+    "psnr_novel_min": 13.701830863952637,
+    "psnr_novel_max": 20.990083694458008
+   },
+   "soapbox": {
+    "windows": 94,
+    "psnr_given_mean": 38.389723757480056,
+    "psnr_given_min": 37.59843444824219,
+    "psnr_given_max": 39.056095123291016,
+    "psnr_novel_mean": 23.76416784651736,
+    "psnr_novel_min": 18.266338348388672,
+    "psnr_novel_max": 34.161502838134766
+   }
+  }
+ },
+ "against_G8": {
+  "windows": 1849,
+  "psnr_given": {
+   "G8_mean": 37.756539197790744,
+   "bf16_mean": 37.580761397316884,
+   "change_mean": -0.17577780047386257,
+   "change_min": -0.7414932250976562,
+   "change_max": 0.1981658935546875,
+   "share_dropping_over_0.5_dB": 0.04326663061114116
+  },
+  "psnr_novel": {
+   "G8_mean": 23.76074918661329,
+   "bf16_mean": 23.749708965831733,
+   "change_mean": -0.011040220781556332,
+   "change_min": -0.5201969146728516,
+   "change_max": 0.4456367492675781,
+   "share_dropping_over_0.5_dB": 0.0005408328826392645
+  }
+ }
+}

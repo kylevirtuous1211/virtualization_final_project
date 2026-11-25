@@ -1,0 +1,306 @@
+{
+ "capacity": {
+  "ts": {
+   "both_repeats": 1,
+   "any_repeat": 1
+  },
+  "mps": {
+   "both_repeats": 1,
+   "any_repeat": 1
+  }
+ },
+ "points": {
+  "ts": {
+   "1": {
+    "r2": {
+     "pass": true,
+     "contaminated": false,
+     "lat_p95_max": 0.19400596618652344,
+     "svc_p50_mean": 0.1819462776184082,
+     "svc_p95_mean": 0.19376158714294434,
+     "svc_depth_p50_mean": 0.04093790054321289,
+     "gaussians_p50": 73728,
+     "weight_bytes": 2423496008,
+     "peak_alloc_max": 3009676800,
+     "updates_min": 180,
+     "expected": 180,
+     "oom_users": 0,
+     "crashed_users": 0,
+     "updates_per_s": 3.00726233959094,
+     "user_vram_mib_min_median_max": [
+      4094,
+      4094,
+      4094
+     ],
+     "gpu_mem_mib_max": 4134,
+     "gpu_util_mean": 45.05555555555556
+    },
+    "r1": {
+     "pass": true,
+     "contaminated": false,
+     "lat_p95_max": 0.19412946701049805,
+     "svc_p50_mean": 0.18378567695617676,
+     "svc_p95_mean": 0.19389700889587402,
+     "svc_depth_p50_mean": 0.040930747985839844,
+     "gaussians_p50": 73728,
+     "weight_bytes": 2423496008,
+     "peak_alloc_max": 3009676800,
+     "updates_min": 180,
+     "expected": 180,
+     "oom_users": 0,
+     "crashed_users": 0,
+     "updates_per_s": 3.007554229303222,
+     "user_vram_mib_min_median_max": [
+      4094,
+      4094,
+      4094
+     ],
+     "gpu_mem_mib_max": 4134,
+     "gpu_util_mean": 48.24193548387097
+    }
+   },
+   "2": {
+    "r2": {
+     "pass": false,
+     "contaminated": false,
+     "lat_p95_max": 11.650406122207642,
+     "svc_p50_mean": 0.4163212776184082,
+     "svc_p95_mean": 0.42454326152801514,
+     "svc_depth_p50_mean": 0.1097254753112793,
+     "gaussians_p50": 73728,
+     "weight_bytes": 2423496008,
+     "peak_alloc_max": 3009676800,
+     "updates_min": 145,
+     "expected": 180,
+     "oom_users": 0,
+     "crashed_users": 0,
+     "updates_per_s": 4.8124651863799155,
+     "user_vram_mib_min_median_max": [
+      4094,
+      4094.0,
+      4094
+     ],
+     "gpu_mem_mib_max": 8233,
+     "gpu_util_mean": 94.37795275590551
+    },
+    "r1": {
+     "pass": false,
+     "contaminated": false,
+     "lat_p95_max": 11.447854042053223,
+     "svc_p50_mean": 0.4151831865310669,
+     "svc_p95_mean": 0.4236733913421631,
+     "svc_depth_p50_mean": 0.09797835350036621,
+     "gaussians_p50": 73728,
+     "weight_bytes": 2423496008,
+     "peak_alloc_max": 3009676800,
+     "updates_min": 146,
+     "expected": 180,
+     "oom_users": 0,
+     "crashed_users": 0,
+     "updates_per_s": 4.8301493040816466,
+     "user_vram_mib_min_median_max": [
+      4094,
+      4094.0,
+      4094
+     ],
+     "gpu_mem_mib_max": 8233,
+     "gpu_util_mean": 95.20472440944881
+    }
+   },
+   "3": {
+    "r2": {
+     "pass": false,
+     "contaminated": false,
+     "lat_p95_max": 27.596182823181152,
+     "svc_p50_mean": 0.6297805309295654,
+     "svc_p95_mean": 0.64285675684611,
+     "svc_depth_p50_mean": 0.16530179977416992,
+     "gaussians_p50": 73728,
+     "weight_bytes": 2423496008,
+     "peak_alloc_max": 3009676800,
+     "updates_min": 96,
+     "expected": 180,
+     "oom_users": 0,
+     "crashed_users": 0,
+     "updates_per_s": 4.777464473605867,
+     "user_vram_mib_min_median_max": [
+      4094,
+      4094,
+      4094
+     ],
+     "gpu_mem_mib_max": 12332,
+     "gpu_util_mean": 95.74015748031496
+    },
+    "r1": {
+     "pass": false,
+     "contaminated": false,
+     "lat_p95_max": 27.552552461624146,
+     "svc_p50_mean": 0.6296199162801107,
+     "svc_p95_mean": 0.6402593453725179,
+     "svc_depth_p50_mean": 0.16680264472961426,
+     "gaussians_p50": 73728,
+     "weight_bytes": 2423496008,
+     "peak_alloc_max": 3009676800,
+     "updates_min": 96,
+     "expected": 180,
+     "oom_users": 0,
+     "crashed_users": 0,
+     "updates_per_s": 4.772093961989088,
+     "user_vram_mib_min_median_max": [
+      4094,
+      4094,
+      4094
+     ],
+     "gpu_mem_mib_max": 12332,
+     "gpu_util_mean": 95.84251968503936
+    }
+   }
+  },
+  "mps": {
+   "1": {
+    "r2": {
+     "pass": true,
+     "contaminated": false,
+     "lat_p95_max": 0.19484353065490723,
+     "svc_p50_mean": 0.1823749542236328,
+     "svc_p95_mean": 0.1946117877960205,
+     "svc_depth_p50_mean": 0.04115653038024902,
+     "gaussians_p50": 73728,
+     "weight_bytes": 2423496008,
+     "peak_alloc_max": 3009676800,
+     "updates_min": 180,
+     "expected": 180,
+     "oom_users": 0,
+     "crashed_users": 0,
+     "updates_per_s": 3.0075150398315085,
+     "user_vram_mib_min_median_max": [
+      4094,
+      4094,
+      4094
+     ],
+     "gpu_mem_mib_max": 4163,
+     "gpu_util_mean": 61.73809523809524
+    },
+    "r1": {
+     "pass": true,
+     "contaminated": false,
+     "lat_p95_max": 0.19100069999694824,
+     "svc_p50_mean": 0.18114995956420898,
+     "svc_p95_mean": 0.19080138206481934,
+     "svc_depth_p50_mean": 0.040955543518066406,
+     "gaussians_p50": 73728,
+     "weight_bytes": 2423496008,
+     "peak_alloc_max": 3009676800,
+     "updates_min": 180,
+     "expected": 180,
+     "oom_users": 0,
+     "crashed_users": 0,
+     "updates_per_s": 3.007507432088517,
+     "user_vram_mib_min_median_max": [
+      4094,
+      4094,
+      4094
+     ],
+     "gpu_mem_mib_max": 4163,
+     "gpu_util_mean": 52.512
+    }
+   },
+   "2": {
+    "r2": {
+     "pass": false,
+     "contaminated": false,
+     "lat_p95_max": 10.24078917503357,
+     "svc_p50_mean": 0.40570366382598877,
+     "svc_p95_mean": 0.41300666332244873,
+     "svc_depth_p50_mean": 0.12847471237182617,
+     "gaussians_p50": 73728,
+     "weight_bytes": 2423496008,
+     "peak_alloc_max": 3009799680,
+     "updates_min": 149,
+     "expected": 180,
+     "oom_users": 0,
+     "crashed_users": 0,
+     "updates_per_s": 4.950081535186644,
+     "user_vram_mib_min_median_max": [
+      4094,
+      4094.0,
+      4094
+     ],
+     "gpu_mem_mib_max": 8258,
+     "gpu_util_mean": 96.624
+    },
+    "r1": {
+     "pass": false,
+     "contaminated": false,
+     "lat_p95_max": 10.312438011169434,
+     "svc_p50_mean": 0.4048243761062622,
+     "svc_p95_mean": 0.4118839502334595,
+     "svc_depth_p50_mean": 0.12841999530792236,
+     "gaussians_p50": 73728,
+     "weight_bytes": 2423496008,
+     "peak_alloc_max": 3009676800,
+     "updates_min": 149,
+     "expected": 180,
+     "oom_users": 0,
+     "crashed_users": 0,
+     "updates_per_s": 4.943683739438766,
+     "user_vram_mib_min_median_max": [
+      4094,
+      4094.0,
+      4094
+     ],
+     "gpu_mem_mib_max": 8258,
+     "gpu_util_mean": 95.18253968253968
+    }
+   },
+   "3": {
+    "r2": {
+     "pass": false,
+     "contaminated": false,
+     "lat_p95_max": 27.21195936203003,
+     "svc_p50_mean": 0.6232907772064209,
+     "svc_p95_mean": 0.6409123738606771,
+     "svc_depth_p50_mean": 0.2028482755025228,
+     "gaussians_p50": 73728,
+     "weight_bytes": 2423496008,
+     "peak_alloc_max": 3010020864,
+     "updates_min": 97,
+     "expected": 180,
+     "oom_users": 0,
+     "crashed_users": 0,
+     "updates_per_s": 4.825455352751682,
+     "user_vram_mib_min_median_max": [
+      4094,
+      4094,
+      4094
+     ],
+     "gpu_mem_mib_max": 12353,
+     "gpu_util_mean": 96.67460317460318
+    },
+    "r1": {
+     "pass": false,
+     "contaminated": false,
+     "lat_p95_max": 27.315638780593872,
+     "svc_p50_mean": 0.6240848700205485,
+     "svc_p95_mean": 0.6420951684316,
+     "svc_depth_p50_mean": 0.21567257245381674,
+     "gaussians_p50": 73728,
+     "weight_bytes": 2423496008,
+     "peak_alloc_max": 3009824256,
+     "updates_min": 97,
+     "expected": 180,
+     "oom_users": 0,
+     "crashed_users": 0,
+     "updates_per_s": 4.811682840434872,
+     "user_vram_mib_min_median_max": [
+      4094,
+      4094,
+      4094
+     ],
+     "gpu_mem_mib_max": 12353,
+     "gpu_util_mean": 95.33070866141732
+    }
+   }
+  }
+ }
+}

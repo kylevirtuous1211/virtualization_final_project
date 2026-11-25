@@ -1,0 +1,127 @@
+{
+ "gate": {
+  "passed": true,
+  "per_run": {
+   "tf32_b1": {
+    "split_identical": true,
+    "forward_self_identical": true,
+    "stage_sum_over_forward": 0.9490833158279307
+   },
+   "tf32_b2": {
+    "split_identical": true,
+    "forward_self_identical": true,
+    "stage_sum_over_forward": 0.9967839747562287
+   },
+   "tf32_b4": {
+    "split_identical": true,
+    "forward_self_identical": true,
+    "stage_sum_over_forward": 1.0100696178173052
+   },
+   "tf32_b8": {
+    "split_identical": true,
+    "forward_self_identical": true,
+    "stage_sum_over_forward": 1.003434887392221
+   },
+   "bf16_b1": {
+    "split_identical": true,
+    "forward_self_identical": true,
+    "stage_sum_over_forward": 0.903793002682405
+   },
+   "bf16_b2": {
+    "split_identical": true,
+    "forward_self_identical": true,
+    "stage_sum_over_forward": 0.9477006206448918
+   },
+   "bf16_b4": {
+    "split_identical": true,
+    "forward_self_identical": true,
+    "stage_sum_over_forward": 0.9939875523499484
+   },
+   "bf16_b8": {
+    "split_identical": true,
+    "forward_self_identical": true,
+    "stage_sum_over_forward": 1.0015364756556029
+   }
+  }
+ },
+ "P1_cacheable_share_b1_tf32": 0.21472640224194178,
+ "P2_bf16_over_tf32_forward_b1": 0.41722348935168857,
+ "P3_busy_share_b1_tf32": 0.8568276412993375,
+ "P3_host_syncs_b1_tf32": 15,
+ "P3_pageable_htod_copies_b1_tf32": 6,
+ "P4_attention_kernels": {
+  "tf32_b1": [
+   "fmha_cutlassF_f32_aligned_64x64_rf_sm80(PyTorchMemEffAttention::AttentionKernel<float, cutlass::arch::Sm80, true, 64, 64"
+  ],
+  "bf16_b1": [
+   "void pytorch_flash::flash_fwd_kernel<pytorch_flash::Flash_fwd_kernel_traits<64, 128, 128, 4, false, false, cutlass::bflo"
+  ]
+ },
+ "P4_attention_share_b1_tf32": 0.6685478935299337,
+ "P5_matmul_ceiling_tflops": {
+  "fp32": 28.775785891945922,
+  "tf32": 65.78381042679744,
+  "bf16": 103.32760468757253
+ },
+ "P5_achieved_share_of_tf32_ceiling_b1": 0.39512988251181586,
+ "P6_per_sample_time_b4_over_b1": {
+  "encoder": 1.106083019034384,
+  "dino": 0.9313832415091272,
+  "static_upsampler": 1.4558335771520174,
+  "static_head": 0.43967240486505604,
+  "encoder_proj": 2.0339506968526093,
+  "decoder": 1.0924993113626627,
+  "dynamic_upsampler": 1.254267712445681,
+  "dynamic_head": 1.1624789561003441,
+  "depth": 1.0570403649905582
+ },
+ "P6_stage_batch_by_rule": {
+  "encoder": 1,
+  "dino": 2,
+  "static_upsampler": 1,
+  "static_head": 8,
+  "encoder_proj": 1,
+  "decoder": 1,
+  "dynamic_upsampler": 1,
+  "dynamic_head": 1,
+  "depth": 1
+ },
+ "P6_saving_per_update_b4_seconds": 0.002878591716289521,
+ "P7_overlap_gain": {
+  "no_priority": -0.0012279288769101449,
+  "depth_high_priority": -0.00615567681624829
+ },
+ "P8_peak_mib_per_extra_sample": {
+  "tf32": 380.810546875,
+  "bf16": 330.8462611607143
+ },
+ "P8_peak_stage_b8": {
+  "tf32": "static_upsampler",
+  "bf16": "static_upsampler"
+ },
+ "forward_p50": {
+  "tf32": {
+   "1": 0.15811858559027314,
+   "2": 0.3259783994872123,
+   "4": 0.6830070575233549,
+   "8": 1.4277450615772977
+  },
+  "bf16": {
+   "1": 0.06597078801132739,
+   "2": 0.11899872752837837,
+   "4": 0.23996926855761558,
+   "8": 0.4999652550322935
+  }
+ },
+ "fp32_highest_b1_forward_p50": 0.24847394949756563,
+ "cached_update_estimate_b1_tf32": 0.1731231230078265,
+ "decisions": {
+  "C1_cache": true,
+  "C2_bf16": true,
+  "C3_nosync": true,
+  "C4_graphs": true,
+  "C5_stage_batching": false,
+  "C6_two_streams": false,
+  "stop_all": false
+ }
+}
