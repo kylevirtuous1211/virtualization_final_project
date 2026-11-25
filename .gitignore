@@ -9,3 +9,5 @@ outputs/
 
 # Upstream clones, pinned and never committed (StreamSplat has no license file)
 third_party/
+__pycache__/
+*.pyc
