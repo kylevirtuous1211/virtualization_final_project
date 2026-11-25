@@ -1,17 +1,13 @@
-% Progress report, built on the USENIX template (usenix2019_v3.sty, from usenix.org's paper templates page).
-% Build: docker run --rm --network none -u $(id -u):$(id -g) -v "$PWD:/w" -w /w texlive-report:medium-usenix latexmk -pdf main.tex
-% (the image is docker/texlive-report/Dockerfile). Figures: make_figures.py.
-% Each number in the sections carries a comment naming the LOG.md entry it comes from; the PDF shows none of them.
 \documentclass[letterpaper,twocolumn,10pt]{article}
 \usepackage{usenix2019_v3}
 
 \usepackage{amsmath}
+\usepackage{amssymb}
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{tikz}
-\usetikzlibrary{arrows.meta,positioning,fit,calc}
+\usetikzlibrary{arrows.meta,positioning}
 
-% The three server configurations, named once here.
 \newcommand{\serial}{\textsf{Serial}}
 \newcommand{\opt}{\textsf{Opt}}
 \newcommand{\optd}{\textsf{Opt+DepthBF16}}
@@ -20,7 +16,7 @@
 
 \date{}
 
-\title{\Large \bf Serving Live Feed-Forward 3D Gaussian Splatting to Many Users on One GPU:\\ Progress Report}
+\title{\Large \bf Multi-User Live Feed-Forward 3D Gaussian Splatting on One GPU:\\ Progress Report}
 
 \author{
 {\rm An Kai Chen}\\

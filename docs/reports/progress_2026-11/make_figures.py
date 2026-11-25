@@ -39,38 +39,6 @@ def mean(values):
     return sum(values) / len(values)
 
 
-def batch1(experiment, arm):
-    """Mean back-to-back updates/s of an arm at batch 1 over its repeats."""
-    return mean(run["updates_per_s"] for run in load(experiment)["points"][arm]["1"].values())
-
-
-def ladder():
-    step0 = load("G16")["derived"]["step0"]
-    steps = [  # (label, experiment, matched control, with the optimisation)
-        ("Feature\ncache", batch1("G11", "nocache"), batch1("G11", "cache")),  # G11
-        ("bf16\nmodel", batch1("G12", "tf32"), batch1("G12", "bf16")),  # G12
-        ("No host\nsync", batch1("G13", "sync"), batch1("G13", "nosync")),  # G13
-        ("CUDA\ngraphs", batch1("G14", "eager"), batch1("G14", "graphs")),  # G14
-        ("bf16\ndepth", step0["fast"]["mean_updates_per_s"], step0["depthbf16"]["mean_updates_per_s"]),  # G16
-    ]
-    fig, ax = plt.subplots(figsize=(WIDTH, 2.0))
-    width = 0.36
-    for index, (label, control, treated) in enumerate(steps):
-        ax.bar(index - width / 2 - 0.01, control, width, color=CONTROL, label="Matched control" if index == 0 else None)
-        ax.bar(index + width / 2 + 0.01, treated, width, color=BLUE, label="With the optimization" if index == 0 else None)
-        ax.text(index + width / 2, treated + 0.3, f"{treated / control:.2f}x", ha="center", va="bottom", color=INK, fontsize=7)
-    ax.set_xticks(range(len(steps)), [step[0] for step in steps])
-    ax.set_ylabel("Updates per second, back to back")
-    ax.set_ylim(0, 18)
-    ax.yaxis.grid(True, color=GRID, linewidth=0.5)
-    ax.set_axisbelow(True)
-    ax.tick_params(axis="x", length=0)
-    ax.legend(loc="upper left", ncol=2, fontsize=7, handlelength=1.0, columnspacing=1.0)
-    fig.tight_layout(pad=0.3)
-    fig.savefig(FIGS / "ladder.pdf")
-    return steps
-
-
 def latency():
     g15, g16 = load("G15")["points"], load("G16")["points"]
     series = [  # (label, colour, marker, [(N, p95 of each repeat)])
@@ -116,10 +84,12 @@ def breakdown():
         configs.append((label, mean(r["svc_p50"] for r in runs), mean(r["svc_depth_p50"] for r in runs)))
     fig, ax = plt.subplots(figsize=(WIDTH, 1.35))
     for row, (label, total, depth) in enumerate(reversed(configs)):
-        ax.barh(row, depth * 1e3, height=0.55, color=BLUE, label="Depth model" if row == 0 else None)
-        ax.barh(row, (total - depth) * 1e3, left=depth * 1e3 + 1.0, height=0.55, color=ORANGE,
-                label="Reconstruction model and the rest" if row == 0 else None)
-        ax.text(total * 1e3 + 4, row, f"{total * 1e3:.0f} ms", va="center", color=INK, fontsize=7)
+        ax.barh(row, depth * 1e3, height=0.55, color=INK2, edgecolor="white", linewidth=1,
+                label="Depth (upload included)" if row == 0 else None)
+        ax.barh(row, (total - depth) * 1e3, left=depth * 1e3, height=0.55, color=CONTROL, edgecolor="white", linewidth=1,
+                label="Rest of the update" if row == 0 else None)
+        ax.text(depth * 1e3 / 2, row, f"{depth * 1e3:.1f}", va="center", ha="center", color="white", fontsize=7)
+        ax.text(total * 1e3 + 4, row, f"{total * 1e3:.1f} ms", va="center", color=INK, fontsize=7)
     ax.set_yticks(range(len(configs)), [c[0] for c in reversed(configs)])
     ax.set_xlabel("Median service time per update (ms)")
     ax.set_xlim(0, 240)
@@ -134,8 +104,6 @@ def breakdown():
 
 if __name__ == "__main__":
     FIGS.mkdir(exist_ok=True)
-    for step in ladder():
-        print("ladder", step[0].replace("\n", " "), round(step[1], 2), round(step[2], 2), f"x{step[2] / step[1]:.3f}")
     for label, _, _, points in latency():
         print("latency", label, sorted({n for n, _ in points}))
     for label, total, depth in breakdown():

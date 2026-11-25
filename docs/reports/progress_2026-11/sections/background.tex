@@ -1,46 +1,20 @@
 \section{Background}
 \label{sec:background}
 
-\subsection{3D Gaussian Splatting and Feed-Forward Reconstruction}
+\subsection{One StreamSplat Update}
 
-3DGS represents a scene as a set of anisotropic 3D Gaussians, each with a position, a shape, an opacity and a color, and renders a view by projecting the Gaussians onto the image plane and blending them in depth order~\cite{kerbl2023gaussian}.
-Kerbl et al.\ fit these parameters to each scene by gradient descent from posed images, after the capture is complete.
-Feed-forward models replace this optimization with one pass of a trained network that predicts the Gaussians from the input frames.
+StreamSplat resizes each keyframe to $512\times288$ and estimates its relative depth with Depth Anything V2 ViT-L~\cite{streamsplat2026,depthanythingv2}. % log: G5
+A static encoder predicts pixel-aligned Gaussians for each keyframe.
+A dynamic decoder then reads a pair of consecutive keyframes.
+It predicts a velocity and an opacity fade for every Gaussian of both keyframes, so the pair renders at any time between them.
+One update in our server is one new keyframe: its depth map, then the Gaussians of the pair of the previous and the new keyframe, 73,728 in all. % log: G5
+The paper keeps the previous keyframe's features for the next pair, while the released code encodes both keyframes at every update.
 
-AnySplat takes a set of unposed video frames and predicts, in one call, a set of Gaussians together with the camera poses of the frames~\cite{anysplat2025}.
-Each call reconstructs $k$ frames and returns a fresh set of Gaussians, so successive calls share no Gaussian identities.
-In our measurements its cost grows with $k$: from $k=2$ to $k=16$ one call went from 0.12 to 0.86~s and the process's GPU memory from 4,726 to 9,576~MiB. % G1
+\subsection{Sharing One GPU}
 
-StreamSplat reconstructs a dynamic scene online from an uncalibrated monocular video~\cite{streamsplat2026}.
-It resizes each frame to $512\times288$ and pairs it with a relative depth map from Depth Anything V2 ViT-L~\cite{depthanythingv2}. % G5
-A static encoder, a vision transformer that sees one frame at a time, predicts pixel-aligned Gaussians, 36,864 per frame. % docs/reading_notes.md (256x144 grid); G5 counts 73,728 per pair
-A dynamic decoder then attends across a pair of consecutive keyframes and predicts, for every Gaussian of both frames, a velocity and two coefficients that fade its opacity over time, so the pair can be rendered at any time between its two keyframes.
-The paper's online algorithm encodes each new keyframe once and keeps the previous keyframe's features for the next pair, while the released inference code encodes every interior keyframe twice.
-One update in our server is one new keyframe: a depth map for it, then Gaussians and motion for the pair formed by the previous and the new keyframe, 73,728 Gaussians in all. % G5
-The paper reports 49~ms per frame on an NVIDIA A100 without saying whether this includes depth; on our GPU the released code takes 0.19~s per update, 0.049~s of it for depth. % 49 ms, A100, depth unstated: docs/reading_notes.md (paper Table 8), G4; 0.19 and 0.049 s: G5 (G5's "unnamed GPU, excludes depth" disagrees with the notes)
-
-The StreamSplat paper evaluates on DAVIS~\cite{davis2017} with keyframes five frames apart and computes PSNR at $256\times256$ on two sets of frames. % G8
-Keyframe PSNR re-renders the two keyframes of a pair, which the model was given, so it measures how faithfully the Gaussians encode the input.
-Middle-frame PSNR renders the four frames between the keyframes, which the model never sees, from the predicted motion, so it measures interpolation in time. % G8
-The two differ by about 14~dB, both in the paper (37.83 and 23.66~dB) and in our reproduction on DAVIS 2017 val (37.76 and 23.76~dB). % G8
-Across the 30 val sequences, our per-sequence mean keyframe PSNR ranges from 33.96 to 42.40~dB and the middle-frame PSNR from 17.09 to 34.61~dB. % G8
-
-\subsection{Sharing One GPU Among Several Users}
-
-When several processes use one NVIDIA GPU, each has its own context, and by default the GPU time-slices among the contexts, so kernels from different processes do not run at the same time~\cite{nvidia_mps}.
-This needs no setup, and it is what independent per-user processes get.
-
-MPS routes the work of several client processes through one server process that holds a single GPU context, so kernels from different clients can run concurrently~\cite{nvidia_mps}.
-MPS can also cap each client's share of the streaming multiprocessors and of device memory.
-
-MIG splits a supported data-center GPU into instances with their own compute units, memory and memory bandwidth, isolating tenants in hardware~\cite{nvidia_mig}.
-The RTX 6000 Ada used in this report does not support MIG, and MIG was disabled on the H200 nodes available to us.
-
-An inference server can also share a GPU at the application level: one process holds one copy of the model weights, collects the pending requests of several users and runs them as one batch~\cite{clockwork2020}.
-Batching helps when one request leaves the GPU underused, and each request then waits for its whole batch.
-
-A CUDA graph records a sequence of kernel launches and memory operations once and replays it with a single launch, which removes the CPU cost of launching each kernel~\cite{nvidia_cuda_guide}.
-Work captured in a graph cannot wait on the host, so host synchronizations inside the model must be removed before capture. % G13
-
-In a cluster, Kubernetes assigns GPUs to containers through NVIDIA's device plugin, which advertises each GPU to the scheduler as a resource that pods request~\cite{k8s_device_plugin}.
-In its default configuration a pod receives whole GPUs, and the plugin's sharing options build on time-slicing and MPS.
+By default, the GPU time-slices between the contexts of different processes, so their kernels never run at the same time~\cite{nvidia_mps}.
+MPS routes several client processes through one context, so their kernels can run concurrently~\cite{nvidia_mps}.
+Multi-Instance GPU (MIG) splits a data-center GPU into hardware partitions, but the RTX 6000 Ada does not support it~\cite{nvidia_mig}.
+An inference server can also run the requests of several users as one batch in one process~\cite{clockwork2020}.
+A CUDA graph records a sequence of kernel launches once and replays it with one launch~\cite{nvidia_cuda_guide}.
+Work inside a graph cannot wait on the host, so a graph needs code without host synchronization.

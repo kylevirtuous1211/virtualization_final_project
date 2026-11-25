@@ -1,58 +1,35 @@
 \section{Continuation of Current Work}
 \label{sec:continuation}
 
-The proposal for this project asked whether a server that streams a changing 3D scene to a web browser should schedule its updates by the capacity the browser measures and reports.
-A server would stream 3DGS scene updates over WebSocket to a renderer written in WebGPU, as additions, modifications and deletions of Gaussians, each addressed by a Gaussian ID.
-The browser would keep a fixed pool of GPU slots and a table that maps Gaussian IDs to slots, in the way an operating system keeps page frames and a page table, so that an addition fills a free slot and a deletion releases one.
-The plan was to measure before designing: the renderer's frame time against scene size, the highest update rate the browser could absorb without dropping frames, the latency of each stage of the pipeline, and the pipeline's behavior under emulated bandwidth limits.
-It would then compare sender policies: first-in first-out, coalescing to the latest value of each Gaussian, flow control by acknowledgements, and admission driven by the capacity the client reports.
-The proposal likened the last policy to the balloon driver through which a hypervisor reclaims memory from a guest with the guest's cooperation~\cite{waldspurger2002}.
-Two clients sharing one network bottleneck would test whether one client's load disturbs the other, the noisy-neighbor problem of shared hosts.
-Its related work covered streaming Gaussian scenes to clients and rendering them in the browser~\cite{siekkinen2026,websplatter2026,moqsplat2026,lts2025,lmg2026,gaussanything2026,partialgs2026}, with 3DGS as the representation~\cite{kerbl2023gaussian} and StreamSplat as a candidate source of updates~\cite{streamsplat2026}.
+The project's proposal described the browser side of this system.
+A server streams Gaussian updates over WebSocket to a WebGPU renderer in each user's browser.
+The browser keeps a fixed pool of GPU slots and a table from Gaussian IDs to slots, like page frames and a page table.
+The client reports how many updates it can absorb, and the server admits updates by that report, like a balloon driver~\cite{waldspurger2002}.
+This report built and measured the server side first, because that is where the users share one physical device.
 
-The virtualization in that plan was an analogy.
-Slots and page tables describe how a renderer manages its own buffers, and no part of the system shared a physical device among tenants through a virtualization mechanism.
-Real GPU sharing appeared only as an optional last milestone that would run several model tenants on the server GPU under time-slicing and MPS, and it was the first milestone to be cut if time ran short.
-We therefore measured the server first, with the model in the system from the start: many users stream live video, one GPU runs a reconstruction per user, and the question is how many users one GPU can serve and which lever raises that number.
-This report covers that server half of the system, and the browser half of the proposal is how the work continues.
+The next step joins the two sides in a demonstration.
+Several users stream video to one server that runs \optd{}, and each browser renders that user's Gaussians, for example with WebSplatter~\cite{websplatter2026}.
+A dashboard shows the users served, each user's latency and the GPU memory in use.
+The demonstration adds the serialization and transfer of each update, and its first question is whether they lower the capacity of \optd{}.
 
-The next step joins the two halves in a front-end demonstration of the measured capacity.
-Several users each stream video to one server that runs \optd{}, and each user's browser renders that user's Gaussians with WebGPU, for example with WebSplatter~\cite{websplatter2026}.
-A dashboard beside the rendered views shows the users served, each user's update latency and the GPU memory in use, from the readings the harness already records.
-Adding users one at a time should expose the limit that the capacity sweep found on the test clip.
-The demonstration also adds work the harness omits, serializing each update's Gaussians and sending them to a browser, and whether this lowers the capacity of \optd{} is the first question it answers.
-With the browser in the loop, the proposal's browser-side measurements and its sender policies apply to the updates a live reconstruction produces.
-
-Three extensions follow, in this order.
-The first is the server's behavior beyond capacity.
-Our harness admits every user and drops no update, so past capacity each user's queue grows for as long as the run lasts. % G2
-Two and three users past the capacity of \optd{}, the worst user's p95 latency reached 3.6--8.5~s within a 60~s run. % G16
-We plan to add two policies and measure each user's tail latency and the fairness of latency across users under overload.
-The first is admission control that refuses a new user when the admitted users' declared update rates would exceed the measured throughput, as Clockwork rejects requests that would miss their deadline~\cite{clockwork2020}.
-The second keeps only each user's latest keyframe, replacing a queued update that has not started, since it loses its value once a newer keyframe exists.
-Fairness needs its own measurement because sharing modes with equal capacity can still give users different latency, as time-slicing and MPS did at five AnySplat users.
-
-The second extension runs each user in its own container under Kubernetes.
-The NVIDIA device plugin offers a time-slicing mode, documented as not isolating the workloads that share a GPU, and an experimental MPS mode that gives each replica an equal share of memory and compute~\cite{k8s_device_plugin}.
-We found no published measurement of how well either mode isolates users, and plan to rerun the capacity sweep with one pod per user under each mode.
-Our earlier probes of the available infrastructure, which are not measurements in this report, set where this runs.
-On our workstation, a kind cluster with the device plugin scheduled a pod onto the RTX 6000 Ada, which in the plugin's default configuration gives the pod the whole GPU~\cite{k8s_device_plugin}.
-Inside a Slurm job on the nano4 cluster there was no cgroup delegation, so a rootless Kubernetes installation there would have no way to enforce resource limits on its containers.
-
-The third extension repeats the measurements, with the same configurations and capacity rule, on the H200 GPUs of the nano4 cluster.
-The H200 also supports MIG, which gives each instance its own L2 cache and DRAM bandwidth and isolates faults between instances~\cite{nvidia_mig}, while MPS documents only a limited form of error containment between its clients~\cite{nvidia_mps}.
-The RTX 6000 Ada does not support MIG~\cite{nvidia_mig}, and an earlier probe found MIG disabled on the nano4 node and in its scheduler, so a MIG configuration depends on the cluster's administrators enabling it. % not in LOG.md: nano4 probe job 682344, 2026-11-02, project memory note
-A user-started MPS daemon did work inside a batch job there, and its per-client memory limit applied to clients started after the limit was set, while a client that was already running could not grow after the limit was raised.
+The next experiments follow from the open questions of Section~\ref{sec:discussion}.
+\begin{itemize}
+\item Combine the levers: split \optd{} into two or three server processes under time-slicing or MPS, against one process.
+\item Measure isolation: one heavy user among normal users, under MPS limits and in one process.
+\item Behave well past capacity: refuse new users when the measured throughput is used up, and replace a queued keyframe by a newer one.
+\item Repeat the capacity sweep with one Kubernetes pod per user, under the NVIDIA device plugin's time-slicing and MPS modes~\cite{k8s_device_plugin}.
+\item Repeat the measurements on an H200, whose MIG partitions isolate users in hardware~\cite{nvidia_mig}.
+\end{itemize}
 
 \section{Conclusion}
 
-We asked how many users one RTX 6000 Ada serves when each user sends one keyframe per second to a feed-forward 3DGS reconstruction server and every user must keep p95 latency within 1~s. % G6, G15, G16
-Time-slicing and MPS served the same number of users in every setting we measured, and batching users' updates into one call lowered throughput. % G2, G3, G6, G7, G9
-Reducing the work per update raised the capacity from 4 users with \serial{} to 10 with \opt{} and 14 with \optd{}, for 0.19~dB of keyframe PSNR on the DAVIS 2017 validation set against full precision. % G15, G16
-At 14 users the card held 4,884~MiB, under 10\% of its memory, so memory was not the limit. % G16
-The capacity results hold for one GPU model and one test clip that every user replays, with two repeats per point, and the batching comparison ran once per batch size. % G2, G3, G6, G7, G9, G15, G16
+We built a framework for serving many users of a live feed-forward 3DGS model from one GPU, with three goals: more users, lower latency and kept quality.
+On the released code, time-slicing and MPS added no users, and batching did not raise throughput. % log: G2, G3, G6, G7, G9
+Less work per update raised capacity from 4 to 14 users on one RTX 6000 Ada, at 0.19~dB of keyframe PSNR. % log: G15, G16
+At capacity, the worst user's p95 latency fell from 0.21~s to 0.07--0.09~s. % log: G15, G16
+Memory did not limit capacity, so the next gains must come from less work or better use of the GPU. % log: G16
 
 \section*{Availability}
 
-The measurement harness, the experiment scripts and the figure script are in the project repository, and every script after the first two experiments carries its predictions, written before the run. % G1 and G2 have no runner header; G3-G16 runners do
-The project's experiment log records each number in this report with the command that re-derives it from the run's output.
+The code, the experiment scripts, the numbers behind every table and a reproduction script are at \url{https://github.com/kylevirtuous1211/virtualization_final_project}.
+The experiment log there records each number with the command that re-derives it.
