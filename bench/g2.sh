@@ -7,7 +7,7 @@
 # to runs/G2/_contaminated and redone; a run that never wrote summary.json is moved to runs/G2/_aborted.
 set -u
 cd "$(dirname "$0")/.."
-PY=~/Desktop/event_camera_2DGS/envs/anysplat/bin/python
+PY=${ANYSPLAT_PY:-third_party/envs/anysplat/bin/python}
 
 wait_free() {
   local idle=0

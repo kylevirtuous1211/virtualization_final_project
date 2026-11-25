@@ -32,7 +32,7 @@
 # Env overrides: ANYSPLAT_PY (python that runs the sweep), G3_OUT (output root).
 set -u
 cd "$(dirname "$0")/../.."
-PY=${ANYSPLAT_PY:-$HOME/Desktop/event_camera_2DGS/envs/anysplat/bin/python}
+PY=${ANYSPLAT_PY:-third_party/envs/anysplat/bin/python}
 OUT=${G3_OUT:-outputs/capacity/G3}
 COMMON=(--k 2 --warmup 3)
 

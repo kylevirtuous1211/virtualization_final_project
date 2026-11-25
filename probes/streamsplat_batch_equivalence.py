@@ -12,10 +12,10 @@ G9's timed runs keep TF32, the authors' setting.
 
 docker run --rm --gpus all --network none --user $(id -u):$(id -g) -e HOME=/tmp -e TORCH_HOME=/torch_home \
   -e USER=$USER -v $PWD:$PWD:ro -v $(realpath third_party/StreamSplat):$(realpath third_party/StreamSplat):ro \
-  -v ~/.cache/torch:/torch_home:ro -v $HOME/Desktop/event_camera_2DGS/third_party/clones/AnySplat/examples/video:$HOME/Desktop/event_camera_2DGS/third_party/clones/AnySplat/examples/video:ro \
+  -v ~/.cache/torch:/torch_home:ro -v $PWD/third_party/data/kitti360:$PWD/third_party/data/kitti360:ro \
   streamsplat:5d686e9 python $PWD/probes/streamsplat_batch_equivalence.py \
-  $HOME/Desktop/event_camera_2DGS/third_party/clones/AnySplat/examples/video/kitti360.mp4
-The clip path is an argument because HOME is /tmp inside the container, so capacity.VIDEO does not resolve there.
+  $PWD/third_party/data/kitti360/kitti360.mp4
+The clip path is an argument, so a clip outside the repository works too.
 An optional second argument sets the matmul precision after loading (default "highest", TF32 off; "high" is
 what load_streamsplat sets and the timed runs use): rounding shrinks without TF32, a leak does not.
 """

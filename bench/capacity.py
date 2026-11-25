@@ -18,13 +18,13 @@ from pathlib import Path
 
 HOME = Path.home()
 REPO = Path(__file__).resolve().parent.parent
-ANYSPLAT = HOME / "Desktop/event_camera_2DGS/third_party/clones/AnySplat"  # @ 5f5e208, read only
-ENV_PY = HOME / "Desktop/event_camera_2DGS/envs/anysplat/bin/python"      # torch 2.2.0+cu121
+ANYSPLAT = Path(os.environ.get("ANYSPLAT_DIR", REPO / "third_party/AnySplat"))  # @ 5f5e208, read only
+ENV_PY = Path(os.environ.get("ANYSPLAT_PY", REPO / "third_party/envs/anysplat/bin/python"))  # torch 2.2.0+cu121
 HF_REPO, HF_REV = "lhjiang/anysplat", "d2e8c343672646041ad4ea518184968f94362f01"
-VIDEO = ANYSPLAT / "examples/video/kitti360.mp4"                           # 64 real frames, 448x336
+VIDEO = Path(os.environ.get("CAPACITY_VIDEO", REPO / "third_party/data/kitti360/kitti360.mp4"))  # 64 real frames, 448x336
 SIZE = 448
 STREAMSPLAT = (REPO / "third_party/StreamSplat").resolve()  # @ 5d686e9, untracked: the repository has no license
-STREAMSPLAT_IMAGE = "streamsplat:5d686e9"                   # docker/streamsplat/Dockerfile
+STREAMSPLAT_IMAGE = os.environ.get("STREAMSPLAT_IMAGE", "streamsplat:5d686e9")  # docker/streamsplat/Dockerfile
 TORCH_HUB = HOME / ".cache/torch"                            # holds dinov2_vitb14_reg4 and vgg16, so users run offline
 
 
