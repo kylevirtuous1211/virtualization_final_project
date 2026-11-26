@@ -1,0 +1,20 @@
+\section{Background}
+\label{sec:background}
+
+\subsection{One StreamSplat Update}
+
+StreamSplat resizes each keyframe to $512\times288$ and estimates its relative depth with Depth Anything V2 ViT-L~\cite{streamsplat2026,depthanythingv2}. % log: G5
+A static encoder predicts pixel-aligned Gaussians for each keyframe.
+A dynamic decoder then reads a pair of consecutive keyframes.
+It predicts a velocity and an opacity fade for every Gaussian of both keyframes, so the pair renders at any time between them.
+One update in our server is one new keyframe: its depth map, then the Gaussians of the pair of the previous and the new keyframe, 73,728 in all. % log: G5
+The paper keeps the previous keyframe's features for the next pair, while the released code encodes both keyframes at every update.
+
+\subsection{Sharing One GPU}
+
+By default, the GPU time-slices between the contexts of different processes, so their kernels never run at the same time~\cite{nvidia_mps}.
+MPS routes several client processes through one context, so their kernels can run concurrently~\cite{nvidia_mps}.
+Multi-Instance GPU (MIG) splits a data-center GPU into hardware partitions, but the RTX 6000 Ada does not support it~\cite{nvidia_mig}.
+An inference server can also run the requests of several users as one batch in one process~\cite{clockwork2020}.
+A CUDA graph records a sequence of kernel launches once and replays it with one launch~\cite{nvidia_cuda_guide}.
+Work inside a graph cannot wait on the host, so a graph needs code without host synchronization.

@@ -1,0 +1,40 @@
+\section{Introduction}
+\label{sec:intro}
+
+3D Gaussian Splatting (3DGS) represents a scene as a set of 3D Gaussians and renders it fast enough for interactive viewing~\cite{kerbl2023gaussian}.
+The original method fits the Gaussians to each scene by optimization, which takes minutes and needs the whole capture.
+Feed-forward models remove this step: a trained network predicts the Gaussians from the input frames in one pass~\cite{anysplat2025,streamsplat2026}.
+StreamSplat reads a monocular video one keyframe at a time and outputs Gaussians with their motion~\cite{streamsplat2026}.
+On our GPU, one StreamSplat update costs about 0.19~s with the released code. % log: G5
+At this cost, a server can keep a live 3D model of a user's camera stream and refresh it about once per second. % log: G5, G6
+
+Many users on one GPU make this a GPU virtualization problem.
+Each user is a tenant with its own model state and deadline.
+The server must know how many tenants it can admit, how fast each update returns, and how much quality it can trade for speed.
+To our knowledge, no published system serves many users of a feed-forward 3DGS model from one GPU (Section~\ref{sec:related}).
+
+We propose a framework for this setting with three goals: serve more users, lower each user's latency, and keep the reconstruction quality.
+The framework compares two levers (Figure~\ref{fig:system}).
+The first lever is the sharing mechanism: time-slicing, NVIDIA's Multi-Process Service (MPS), or batching across users.
+These mechanisms change where the work of several users runs.
+The second lever is the work per update: a feature cache, bfloat16 (bf16) arithmetic, CUDA graphs and a bf16 depth model.
+These changes shrink the work of every update.
+We measure capacity, the largest number of users that meet a latency service-level objective (SLO), on one NVIDIA RTX 6000 Ada.
+
+The sharing mechanisms did not add users to the released code.
+MPS served as many users as time-slicing in all four settings we ran. % log: G2, G3, G6, G7
+Batching eight users' updates into one call gave 0.92 times the throughput of one update per call. % log: G9
+Less work per update did add users.
+At one keyframe per user per second, the released code serves 4 users, the optimized server 10, and the server with a bf16 depth model 14. % log: G15, G16
+The cost is 0.19~dB of keyframe PSNR, and 14 users use 4,884~MiB, about 10\% of the card's memory. % log: G16
+
+This report makes three contributions.
+\begin{itemize}
+\item A framework and harness for multi-user feed-forward 3DGS serving.
+It adapts SLO-based capacity from DNN serving~\cite{clockwork2020} to stateful per-user streams, and it times each optimization against an interleaved matched control.
+\item A negative result for the sharing mechanisms on the released code: time-slicing and MPS add no users, and batching does not raise throughput.
+\item An ablation of five per-update optimizations that raises capacity from 4 to 14 users and lowers the worst p95 latency, with its quality cost measured on DAVIS 2017 val. % log: G11-G16
+\end{itemize}
+This progress report covers the server side.
+It measures capacity and latency only, not the allocation of GPU time between unequal users or their isolation.
+Section~\ref{sec:continuation} describes the browser side and the next experiments.

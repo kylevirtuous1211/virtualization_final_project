@@ -1,0 +1,100 @@
+\section{Experimental Setup}
+\label{sec:setup}
+
+\subsection{Workload}
+
+Each user sends the server one keyframe per period $T$, and the server turns it into an update of that user's Gaussians (Figure~\ref{fig:system}).
+All users replay a 64-frame KITTI-360 clip~\cite{kitti360}, each user from its own offset. % log: G5
+The clip serves only for timing, because the cost of an update depends on the input's shape, not its content. % log: G5
+Service time covers the upload and the GPU work of an update, and rendering is not timed. % log: G1, G5
+User $r$ of $N$ releases its $j$-th update at $t_0 + (r/N + j)\,T$, so the arrivals are evenly staggered.
+Latency is an update's finish time minus its release time, so it includes queueing, and the server drops no keyframe. % log: G2
+For the sharing measurements, we also ran AnySplat~\cite{anysplat2025}, which reconstructs $k$ frames per call, as a second workload. % log: G1
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+    font=\footnotesize, node distance=2.5mm and 5mm, >={Stealth[length=4pt]},
+    box/.style={draw, rounded corners=2pt, align=center, minimum height=6mm, inner sep=2pt},
+    lever/.style={font=\footnotesize\bfseries, align=left, anchor=west},
+  ]
+  \node[lever] (l1) {Lever 1: where the users' work runs};
+  \node[box, below=1.5mm of l1.south west, anchor=north west, text width=17mm] (ts) {Process per user\\{\scriptsize time-slicing}};
+  \node[box, right=1.5mm of ts, text width=17mm] (mps) {Process per user\\{\scriptsize MPS}};
+  \node[box, right=1.5mm of mps, text width=17mm] (batch) {One server\\{\scriptsize batch of users}};
+  \node[lever, below=3mm of ts.south west] (l2) {Lever 2: how much work one update does};
+  \node[box, below=1.5mm of l2.south west, anchor=north west, text width=21mm, fill=black!6] (serial) {\serial{}\\{\scriptsize released code}};
+  \node[box, right=1.5mm of serial, text width=21mm, fill=black!6] (opt) {\opt{}\\{\scriptsize cache, bf16, graphs}};
+  \node[box, below=1.5mm of serial.south west, anchor=north west, text width=44.5mm, fill=black!6] (optd) {\optd{}\\{\scriptsize \opt{} and a bf16 depth model}};
+  \draw[->] (serial) -- (opt);
+  \draw[->] (opt.south) -- (opt.south |- optd.north);
+  \node[box, right=5mm of opt.east, text width=15mm, dashed] (browser) {Browsers\\{\scriptsize next step}};
+  \draw[->, dashed] (opt.east) -- (browser.west);
+\end{tikzpicture}
+\caption{The two levers of the framework.
+Each of $N$ users sends one keyframe per period, and one GPU runs a depth model and a StreamSplat update for it.
+Lever 1 changes where several users' updates run.
+Lever 2 shrinks each update.
+Streaming the Gaussians to the users' browsers is the next step.}
+\label{fig:system}
+\end{figure}
+
+\subsection{Configurations}
+
+The per-user placements give each user its own process with its own copy of the weights.
+These processes share the GPU by time-slicing or through MPS with no per-client limit. % log: G2, G6
+The batching server holds one copy of the weights and runs up to $b$ pending updates, one per user, as one batch. % log: G9
+At $b=1$ this server is our baseline, \serial{}: the released forward pass with TF32 matrix arithmetic and the authors' block checkpointing. % log: G9, G15
+We added five optimizations to it, one at a time (Table~\ref{tab:configs}). % log: G11-G14, G16
+Turning block checkpointing off came with CUDA graphs and was not timed alone. % log: G14
+Batching and the cache changed the Gaussians by at most $4.7\times10^{-6}$ in mean absolute value in FP32. % log: G9, G11
+Two different users differ by $2.0\times10^{-2}$ or more, so these changes keep the output. % log: G9, G11
+The two bf16 changes alter the output, so we measured their cost in quality.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+ & Feature & bf16 & No host & No check- & CUDA & bf16 \\
+Configuration & cache & model & sync & pointing & graphs & depth \\
+\midrule
+\serial{} & & & & & & \\
+\opt{} & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \\
+\optd{} & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark \\
+\bottomrule
+\end{tabular}
+\caption{The three server configurations.
+The cache keeps the previous keyframe's features.
+CUDA graphs need the host synchronizations removed and block checkpointing off.}
+\label{tab:configs}
+\end{table}
+
+\subsection{Throughput and Capacity}
+
+Back-to-back throughput releases every update at once, discards 3 warm-up updates and times the next 20. % log: G5, G9
+The capacity sweep runs each number of users $N$ for 60~s after 3 warm-up updates. % log: G2, G6, G15
+A run meets the SLO if the worst user's p95 latency is at most the period, every update finishes and no process runs out of memory. % log: G2, G6, G7
+The p95 is the fourth-largest of a user's 60 latencies.
+Capacity is the largest $N$ at which both of 2 repeated runs meet the SLO. % log: G2, G6, G15, G16
+In the sweeps of Table~\ref{tab:capacity}, every failing run also left updates unfinished. % log: G15, G16
+There, any SLO of 0.21~s or more gives the same capacities. % log: G15, G16
+The SLO therefore separates stable queues from growing ones.
+Each comparison runs its two configurations interleaved, point by point, on a grid fixed before the run. % log: G6, G15, G16
+The harness waits for an idle GPU before each run and reruns any run that another process touched. % log: G2, G9, G12
+From the third experiment on, each run script holds the predictions we wrote before the run.
+
+\subsection{Quality}
+
+We measure quality as the paper does, on the 30 validation sequences of DAVIS 2017~\cite{davis2017}. % log: G8
+A window is six consecutive frames, and its first and last frames are the keyframes, 1,849 windows in all. % log: G8
+Keyframe PSNR renders the two keyframes, which the model sees.
+Middle-frame PSNR renders the four frames between them from the predicted motion. % log: G8
+We use the authors' code at 256$\times$256, and our full-precision run reproduces the paper (Table~\ref{tab:quality}). % log: G8
+
+\subsection{Hardware and Software}
+
+The GPU is an NVIDIA RTX 6000 Ada with 49,140~MiB on driver 595.91.07. % log: G2, G16
+StreamSplat runs from the authors' commit 5d686e9 in a Docker image built from their environment. % log: G4
+The per-user runs keep the authors' \texttt{torch.compile}, and the server runs leave it off. % log: G5, G9-G16

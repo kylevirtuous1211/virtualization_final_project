@@ -1,0 +1,35 @@
+\section{Continuation of Current Work}
+\label{sec:continuation}
+
+The project's proposal described the browser side of this system.
+A server streams Gaussian updates over WebSocket to a WebGPU renderer in each user's browser.
+The browser keeps a fixed pool of GPU slots and a table from Gaussian IDs to slots, like page frames and a page table.
+The client reports how many updates it can absorb, and the server admits updates by that report, like a balloon driver~\cite{waldspurger2002}.
+This report built and measured the server side first, because that is where the users share one physical device.
+
+The next step joins the two sides in a demonstration.
+Several users stream video to one server that runs \optd{}, and each browser renders that user's Gaussians, for example with WebSplatter~\cite{websplatter2026}.
+A dashboard shows the users served, each user's latency and the GPU memory in use.
+The demonstration adds the serialization and transfer of each update, and its first question is whether they lower the capacity of \optd{}.
+
+The next experiments follow from the open questions of Section~\ref{sec:discussion}.
+\begin{itemize}
+\item Combine the levers: split \optd{} into two or three server processes under time-slicing or MPS, against one process.
+\item Measure isolation: one heavy user among normal users, under MPS limits and in one process.
+\item Behave well past capacity: refuse new users when the measured throughput is used up, and replace a queued keyframe by a newer one.
+\item Repeat the capacity sweep with one Kubernetes pod per user, under the NVIDIA device plugin's time-slicing and MPS modes~\cite{k8s_device_plugin}.
+\item Repeat the measurements on an H200, whose MIG partitions isolate users in hardware~\cite{nvidia_mig}.
+\end{itemize}
+
+\section{Conclusion}
+
+We built a framework for serving many users of a live feed-forward 3DGS model from one GPU, with three goals: more users, lower latency and kept quality.
+On the released code, time-slicing and MPS added no users, and batching did not raise throughput. % log: G2, G3, G6, G7, G9
+Less work per update raised capacity from 4 to 14 users on one RTX 6000 Ada, at 0.19~dB of keyframe PSNR. % log: G15, G16
+At capacity, the worst user's p95 latency fell from 0.21~s to 0.07--0.09~s. % log: G15, G16
+Memory did not limit capacity, so the next gains must come from less work or better use of the GPU. % log: G16
+
+\section*{Availability}
+
+The code, the experiment scripts, the numbers behind every table and a reproduction script are at \url{https://github.com/kylevirtuous1211/virtualization_final_project}.
+The experiment log there records each number with the command that re-derives it.

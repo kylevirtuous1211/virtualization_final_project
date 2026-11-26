@@ -1,0 +1,29 @@
+\section{Related Work}
+\label{sec:related}
+
+\textbf{3DGS systems.}
+GSCore adds hardware support for the sorting and rasterization that dominate 3DGS rendering~\cite{gscore2024}.
+SCARF accelerates the encoders of feed-forward 3DGS models in hardware, for one stream~\cite{scarf2026}.
+
+\textbf{Streaming 3DGS and volumetric content.}
+MuV2 serves several users of volumetric video from one edge server, where the wireless link and the video encoder limit the number of users~\cite{muv2_2024}.
+Other systems stream layered, progressive or deadline-scheduled Gaussian scenes to clients~\cite{l3gs2025,lts2025,lmg2026,moqsplat2026,partialgs2026,gaussanything2026,siekkinen2026}.
+WebSplatter renders 3DGS in the browser with WebGPU~\cite{websplatter2026}.
+These systems schedule network bandwidth, video encoders and the client's GPU, not a GPU that builds the Gaussians.
+
+\textbf{GPU sharing and DNN serving.}
+MPS suits processes that leave the GPU partly idle~\cite{nvidia_mps,gilman2021}.
+Clockwork finds that one inference at a time gives throughput close to concurrent execution, with more predictable latency~\cite{clockwork2020}.
+AlpaServe finds that model placement stops helping as the request rate nears the peak service rate~\cite{alpaserve2023}.
+REEF, Orion and TGS protect one latency-critical tenant from best-effort tenants~\cite{reef2022,orion2024,tgs2023}.
+Video analytics systems batch and schedule many camera streams under latency SLOs~\cite{nexus2019,videostorm2017}.
+In our setting, many equal tenants run one heavy model with per-user state.
+
+\textbf{GPU sharing for interactive sessions.}
+gVirt and gScale virtualize a GPU among virtual machines~\cite{gvirt2014,gscale2016}, and PilotFish shares cloud-gaming GPUs with training jobs~\cite{pilotfish2022}.
+SwarmMap serves many SLAM agents from one edge server~\cite{swarmmap2022}.
+
+\textbf{Novelty.}
+We searched systems, architecture, networking and multimedia venues and arXiv from 2023 to November 2026.
+We found no system in which many users share one GPU for feed-forward 3DGS reconstruction with per-user latency measured.
+A keyword search can miss work described in other terms.

@@ -1,0 +1,12 @@
+\begin{abstract}
+Feed-forward 3D Gaussian Splatting (3DGS) models turn video into a 3D scene in one network pass.
+This speed makes a live 3D model of each user's camera stream possible.
+To our knowledge, no published system serves many such users from one GPU.
+We build a framework for this setting with three goals: serve more users, lower each user's latency, and keep the reconstruction quality.
+Capacity is the largest number of users whose worst 95th-percentile update latency stays within 1~s at one keyframe per user per second.
+On one RTX 6000 Ada running StreamSplat, time-slicing and MPS added no users to the released code, and batching did not raise its throughput. % log: G6, G7, G9
+Less work per update raised capacity from 4 to 10 and then to 14 users. % log: G15, G16
+At capacity, the worst user's p95 latency fell from 0.21~s to 0.07--0.09~s. % log: G15, G16
+The keyframe PSNR cost is 0.19~dB on DAVIS 2017 val. % log: G16
+This report covers the server side.
+\end{abstract}

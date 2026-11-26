@@ -1,0 +1,26 @@
+\section{Discussion}
+\label{sec:discussion}
+
+Our reading is that one StreamSplat user's updates already keep this GPU busy, so a sharing mechanism can only divide the same throughput among more users.
+Three measurements agree with this reading.
+Past capacity, StreamSplat under time-slicing and MPS stayed below the rate of one user alone. % log: G5, G6
+Batching raised GPU utilization and lowered throughput. % log: G9
+Removing host synchronizations and adding CUDA graphs recovered at most 5.2\%, although the profile showed the GPU idle for 14--22\% of a forward pass. % log: G10, G13, G14
+Work on GPU sharing predicts this outcome for a saturated GPU~\cite{nvidia_mps,gilman2021,clockwork2020,alpaserve2023}.
+We did not measure SM occupancy, so this reading rests on throughput and utilization only.
+Memory does not limit capacity, since 14 users use about 10\% of the card. % log: G16
+The other 90\% could pay for more saved work, as the feature cache does.
+
+We expect capacity to be about 0.89 times the back-to-back throughput divided by the per-user rate. % log: G16
+A sweep on another GPU or clip that fails the SLO below 0.86 of the back-to-back rate would refute this rule. % log: G16
+
+The results have a narrow scope, and several questions remain open.
+\begin{itemize}
+\item \textbf{Sharing after Lever 2.} Under bf16 the GPU is busy for 78\% of a forward pass, so sharing may help \optd{}. % log: G10
+\item \textbf{Isolation.} We did not measure how one heavy user delays the others.
+\item \textbf{Arrivals.} All users send at evenly staggered times, the best case for the server.
+\item \textbf{Inputs.} We used one GPU model and one clip shape, and we measured quality at another keyframe spacing than the server uses.
+\item \textbf{Depth model.} The depth stage is still 45\% of an update, and we have not tried a smaller depth model. % log: G16
+\item \textbf{Repeats.} Each point has 2 repeats, so differences of a few percent show a direction only. % log: G15, G16
+\item \textbf{Drift.} \opt{} took 90.0~ms per update at 12 users in one sweep and 96.6--96.7~ms in the other, and we did not test why. % log: G15, G16
+\end{itemize}

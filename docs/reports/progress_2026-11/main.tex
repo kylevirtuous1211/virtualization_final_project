@@ -1,0 +1,40 @@
+\documentclass[letterpaper,twocolumn,10pt]{article}
+\usepackage{usenix2019_v3}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
+
+\newcommand{\serial}{\textsf{Serial}}
+\newcommand{\opt}{\textsf{Opt}}
+\newcommand{\optd}{\textsf{Opt+DepthBF16}}
+
+\begin{document}
+
+\date{}
+
+\title{\Large \bf Multi-User Live Feed-Forward 3D Gaussian Splatting on One GPU:\\ Progress Report}
+
+\author{
+{\rm An Kai Chen}\\
+National Tsing Hua University
+}
+
+\maketitle
+
+\input{sections/abstract}
+\input{sections/introduction}
+\input{sections/background}
+\input{sections/setup}
+\input{sections/results}
+\input{sections/discussion}
+\input{sections/related}
+\input{sections/continuation}
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}
