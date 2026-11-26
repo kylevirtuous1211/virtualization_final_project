@@ -4,9 +4,9 @@
 #   ./reproduce.sh setup        fetch StreamSplat @ 5d686e9, the weights, the KITTI-360 clip and DAVIS 2017; verify sha256
 #   ./reproduce.sh build        build the StreamSplat and TeX images
 #   ./reproduce.sh smoke        ~10 GPU minutes: does this machine give the published numbers? (PASS/FAIL)
-#   ./reproduce.sh experiments  rerun every StreamSplat experiment, G4-G16 (~6 GPU hours, needs an idle GPU)
-#   ./reproduce.sh collect      copy the new numbers into results/; `git diff results/` shows what moved
-#   ./reproduce.sh report       redraw the figures from results/ and rebuild the PDF (byte-identical when unchanged)
+#   ./reproduce.sh experiments  rerun the final experiments G8, G12, G15, G16 (~3 GPU hours, needs an idle GPU),
+#                               then redraw the figures from outputs/; `git diff` shows whether they moved
+#   ./reproduce.sh report       rebuild the PDF from the committed sources and figures (byte-identical, no GPU)
 #   ./reproduce.sh all          all of the above, in order
 #
 # Environment: STREAMSPLAT_IMAGE, TEXLIVE_IMAGE (image tags), DOCKER_BUILD_ARGS (extra docker build flags).
@@ -23,6 +23,7 @@ DATA=$ROOT/third_party/data
 TORCH_HUB=$HOME/.cache/torch/hub/checkpoints  # the runners mount ~/.cache/torch into the containers
 REPORT=$ROOT/docs/reports/progress_2026-11
 export SOURCE_DATE_EPOCH=1795564800  # 2026-11-25: fixed timestamps make the figures and the PDF byte-reproducible
+REFERENCE=full-2026-11-25  # the tag whose results/ holds the published numbers that smoke compares against
 
 # name | destination directory | sha256 | url
 DOWNLOADS="
@@ -115,7 +116,12 @@ smoke() {  # G16's back-to-back step 0 for both arms, and G8's full-precision qu
       "$OUT/windows.jsonl" val $short > "$OUT/eval.log" 2>&1 || { echo "evaluation failed; read $OUT/eval.log"; exit 1; }
     touch "$OUT/quality.done"
   fi
-  python3 - "$OUT" "$ROOT/results" <<'EOF'
+  mkdir -p "$OUT/reference/capacity/G16" "$OUT/reference/streamsplat-repro/G8"
+  for file in capacity/G16/metrics.json streamsplat-repro/G8/windows.jsonl; do
+    git show "$REFERENCE:results/$file" > "$OUT/reference/$file" \
+      || { echo "cannot read tag $REFERENCE; run git fetch --tags"; exit 1; }
+  done
+  python3 - "$OUT" "$OUT/reference" <<'EOF'
 import json, statistics, sys
 from pathlib import Path
 out, results = Path(sys.argv[1]), Path(sys.argv[2])
@@ -156,13 +162,8 @@ EOF
 
 experiments() {  # dependency order: G12 reads G8's outputs, G16 reads G8's and G12's
   local runner code summary=""
-  for runner in experiments/streamsplat-repro/run_G4_davis-bear.sh experiments/capacity/run_G5_streamsplat-cost.sh \
-      experiments/capacity/run_G6_streamsplat-1hz.sh experiments/capacity/run_G7_streamsplat-3hz.sh \
-      experiments/streamsplat-repro/run_G8_davis-val-authors-metric.sh experiments/capacity/run_G9_streamsplat-batched.sh \
-      experiments/capacity/run_G10_streamsplat-stage-profile.sh experiments/capacity/run_G11_streamsplat-cache.sh \
-      experiments/capacity/run_G12_streamsplat-bf16.sh experiments/capacity/run_G13_streamsplat-nosync.sh \
-      experiments/capacity/run_G14_streamsplat-graphs.sh experiments/capacity/run_G15_streamsplat-fast-1hz.sh \
-      experiments/capacity/run_G16_streamsplat-depth-bf16.sh; do
+  for runner in experiments/streamsplat-repro/run_G8_davis-val-authors-metric.sh experiments/capacity/run_G12_streamsplat-bf16.sh \
+      experiments/capacity/run_G15_streamsplat-fast-1hz.sh experiments/capacity/run_G16_streamsplat-depth-bf16.sh; do
     echo "=== $runner"
     code=0
     bash "$runner" || code=$?
@@ -170,13 +171,12 @@ experiments() {  # dependency order: G12 reads G8's outputs, G16 reads G8's and 
   done
   echo "=== exit codes (a registered gate that stops a runner, such as G9's exit 3, is a result; LOG.md says which):"
   printf '%s' "$summary"
-}
-
-collect() { python3 results/collect.py; }
-
-report() {
   docker run --rm --network none -u "$(id -u):$(id -g)" -e HOME=/tmp -e MPLCONFIGDIR=/tmp -e SOURCE_DATE_EPOCH \
     -v "$ROOT:$ROOT" -w "$ROOT" "$STREAMSPLAT_IMAGE" python "$REPORT/make_figures.py"
+  git status --short "$REPORT/figures"
+}
+
+report() {
   docker run --rm --network none -u "$(id -u):$(id -g)" -e SOURCE_DATE_EPOCH -e FORCE_SOURCE_DATE=1 \
     -v "$REPORT:/w" -w /w "$TEXLIVE_IMAGE" latexmk -g -pdf -interaction=nonstopmode -quiet main.tex
   echo "report: $REPORT/main.pdf"
@@ -185,8 +185,8 @@ report() {
 [ $# -gt 0 ] || { sed -n '2,13p' "$0"; exit 2; }
 for step in "$@"; do
   case $step in
-    setup|build|smoke|experiments|collect|report) "$step" ;;
-    all) setup; build; smoke; experiments; collect; report ;;
+    setup|build|smoke|experiments|report) "$step" ;;
+    all) setup; build; smoke; experiments; report ;;
     *) echo "unknown step: $step"; sed -n '2,13p' "$0"; exit 2 ;;
   esac
 done

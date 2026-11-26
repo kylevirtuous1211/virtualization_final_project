@@ -3,7 +3,7 @@
 Run in the StreamSplat image, which has matplotlib:
   docker run --rm --network none -u $(id -u):$(id -g) -v "$PWD:$PWD" -w "$PWD" streamsplat:5d686e9 \
     python docs/reports/progress_2026-11/make_figures.py
-OUTPUTS overrides the source root (default: <repo>/results/capacity, which results/collect.py fills from outputs/).
+OUTPUTS overrides the source root (default: <repo>/outputs/capacity, where the G15 and G16 runners write).
 """
 import json, os
 from pathlib import Path
@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker
 
 HERE = Path(__file__).resolve().parent
-OUT = Path(os.environ.get("OUTPUTS", HERE.parents[2] / "results" / "capacity"))
+OUT = Path(os.environ.get("OUTPUTS", HERE.parents[2] / "outputs" / "capacity"))
 FIGS = HERE / "figures"
 
 # dataviz reference palette, light mode; slots 1-3 validate under all pairs.
