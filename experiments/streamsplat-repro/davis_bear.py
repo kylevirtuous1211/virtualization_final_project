@@ -1,4 +1,4 @@
-"""G4 helper, run inside the StreamSplat image by run_G4_davis-bear.sh.
+"""DAVIS helpers, run inside the StreamSplat image: davis_eval.py (G8, G12, G16) imports depth; psnr and checks served G4.
 
   depth <frames-dir> <depth-dir> : Depth Anything V2 depth for every frame, made exactly as the authors'
                                    preprocess_depth_davis.py makes it (their Predictor and resize functions,

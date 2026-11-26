@@ -21,7 +21,7 @@ Memory is not the limit: 14 users use 4,884 MiB, about 10% of the card.
 ## Read first
 
 1. The report PDF: the question, the setup and the four results in 5 pages.
-2. `results/tables.md`: every table of the report, computed from the files in `results/`.
+2. `experiments/capacity/run_G16_streamsplat-depth-bf16.sh`: the final experiment; its header holds the predictions, written before the run.
 3. `bench/capacity.py`: the harness that runs N users and checks the latency SLO.
 
 ## Repository map
@@ -29,16 +29,20 @@ Memory is not the limit: 14 users use 4,884 MiB, about 10% of the card.
 | Path | What it holds |
 |---|---|
 | `bench/` | The measurement harness. `capacity.py` runs N users; `sweep_lib.sh` holds the functions the runners share. |
-| `experiments/<study>/run_G<n>_<slug>.sh` | One runner per experiment. Its header holds the predictions, written before the run. |
+| `experiments/<study>/run_G<n>_<slug>.sh` | The runners of the four final experiments: G8 (quality of the released model), G12 (bf16 model), G15 (released against Opt), G16 (Opt+DepthBF16). Each writes its numbers to `outputs/` (untracked). |
 | `probes/` | Equivalence checks that the runners call before they time anything. |
-| `results/` | The numbers behind the report, copied from the runs by `collect.py`. |
 | `LOG.md` | The experiment log: question, command, number and what each entry overturns. Read an entry when you need the evidence for a number. |
+| `.claude/rules/` | Rules for coding agents, such as the check before every push. |
 | `docker/` | The StreamSplat image and the TeX image. |
 | `docs/reports/progress_2026-11/` | The report's LaTeX source and figures. |
 | `reproduce.sh` | Fetch, build, check and rerun everything below. |
 
-Each number in the report source carries a `% log: G<n>` tag that names its log entry.
-Earlier notes and plans are in the git history at commit `0784830`.
+## Where the report's numbers come from
+
+- Each number in the report source carries a `% log: G<n>` tag; that entry in `LOG.md` gives the command and the number.
+- The tip holds only the final experiments.
+  The other runners (G3 to G18) and the raw results behind every table are at the tag `full-2026-11-25`: `git show full-2026-11-25:<path>`, or `git checkout full-2026-11-25 -- results experiments`.
+- Earlier notes and plans are at commit `0784830`.
 
 ## Reproduce
 
@@ -48,18 +52,17 @@ You need Linux, an NVIDIA GPU, Docker with the NVIDIA Container Toolkit, git, cu
 ./reproduce.sh setup        # fetch StreamSplat @ 5d686e9, the weights, the clip and DAVIS 2017; verify every sha256
 ./reproduce.sh build        # build the StreamSplat image (about 20 minutes) and the TeX image
 ./reproduce.sh smoke        # about 10 GPU minutes: PASS/FAIL against the published throughput and quality
-./reproduce.sh experiments  # rerun every StreamSplat experiment, G4 to G16 (about 6 GPU hours)
-./reproduce.sh collect      # copy the new numbers into results/; `git diff results/` shows what moved
-./reproduce.sh report       # redraw the figures and rebuild the PDF from results/
+./reproduce.sh experiments  # rerun the final experiments G8, G12, G15, G16 (about 3 GPU hours), then redraw the two figures
+./reproduce.sh report       # rebuild the PDF from the committed sources and figures
 ```
 
-- Verified from a fresh clone of this repository on 2026-11-25 (`LOG.md` G18): every download matched, both images built, `smoke` passed (throughput 3.0% and 2.9% below G16, quality windows bitwise equal to G8), and `report` rebuilt the PDF byte for byte.
-- `report` uses the images from `build` but no GPU, and it rebuilds the committed PDF byte for byte.
+- `smoke` compares against the published numbers at the tag `full-2026-11-25`, so it needs the tags (`git fetch --tags` in a shallow clone).
+- Verified from a fresh clone of the tag's tree on 2026-11-25 (`LOG.md` G18): every download matched, both images built, `smoke` passed (throughput 3.0% and 2.9% below G16, quality windows bitwise equal to G8), and `report` rebuilt the PDF byte for byte.
+- `report` uses the TeX image from `build` but no GPU, and it rebuilds the committed PDF byte for byte.
 - `experiments` needs a GPU that nothing else uses: the runners redo any run that another process touched.
-- The numbers come from an RTX 6000 Ada. On another GPU, a gate registered for that GPU (G9, G15, G16) may stop a runner; `LOG.md` gives each gate.
-
-The AnySplat runs (G1 to G3, the first two rows of the sharing table) are not scripted.
-They need AnySplat at commit `5f5e208` in `third_party/AnySplat`, a Python 3.10 environment with torch 2.2.0+cu121 at `third_party/envs/anysplat` (with its `uv pip freeze` in `freeze.txt`), and the cached Hugging Face weights `lhjiang/anysplat@d2e8c34` and `facebook/VGGT-1B@860abec`.
+  After it, `git status docs/reports` shows whether the figures moved.
+- The numbers come from an RTX 6000 Ada. On another GPU, a gate registered for that GPU (G15, G16) may stop a runner; `LOG.md` gives each gate.
+- The AnySplat runs (G1 to G3, the first two rows of the sharing table) are not scripted; the tag's README says what they need.
 
 ## Third-party code, models and data
 

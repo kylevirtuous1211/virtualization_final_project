@@ -13,8 +13,9 @@
 
 ## 東西在哪
 
-- 報告 `docs/reports/progress_2026-11/`；實驗紀錄 `LOG.md`；報告引用的數字 `results/`。
-- 量測框架 `bench/`；每個實驗的 runner `experiments/<study>/run_G<n>_<slug>.sh`；重現 `reproduce.sh`。
+- 報告 `docs/reports/progress_2026-11/`；實驗紀錄和報告引用的數字 `LOG.md`；runner 的原始輸出 `outputs/`（不追蹤）。
+- 量測框架 `bench/`；最終 4 個實驗（G8、G12、G15、G16）的 runner `experiments/<study>/run_G<n>_<slug>.sh`；重現 `reproduce.sh`。
+- 其他實驗的 runner 和 `results/` 在 tag `full-2026-11-25`。
 
 ## 規則
 
